@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.env
+.env.local
+*.log
+coverage
+sample-posts
+social-posts/pending/*
+social-posts/processing/*
+social-posts/completed/*
+social-posts/failed/*
+public-media/*
+.DS_Store
