@@ -1,0 +1,171 @@
+// Woodivo Social Publisher - Prisma Schema (MongoDB)
+// Stores publishing jobs, structured logs, retry history, AI responses,
+// Meta Graph API responses, and final publishing history.
+//
+// MongoDB has no native foreign keys, so relations are emulated by Prisma
+// itself (relationMode = "prisma"). Each model below becomes its own
+// collection in whatever database DATABASE_URL points to.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "mongodb"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+}
+
+enum PublishJobStatus {
+  PENDING
+  PROCESSING
+  VALIDATING
+  AI_GENERATING
+  MEDIA_PROCESSING
+  PUBLISHING
+  COMPLETED
+  FAILED
+}
+
+enum PublishStage {
+  VALIDATION
+  AI_GENERATION
+  MEDIA_PROCESSING
+  PUBLISHING
+  ARCHIVING
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+// What kind of Woodivo content a post originated from - lets the scheduler
+// give each content type its own turn per run (see SchedulerService) instead
+// of one type's backlog starving another's. OTHER covers posts submitted
+// without this context (e.g. dropped directly into pending/ for local testing).
+enum PostSourceType {
+  PRODUCT
+  BLOG
+  OTHER
+}
+
+model PublishJob {
+  id                 String           @id @default(auto()) @map("_id") @db.ObjectId
+  folderName         String
+  folderPath         String
+  status             PublishJobStatus @default(PENDING)
+  seoRawText         String
+  seoParsed          Json?
+  mediaType          String?
+  mediaPath          String?
+  processedMediaPath String?
+  generatedContent   Json?
+  failureReason      String?
+  failedStage        PublishStage?
+  sourceType         PostSourceType   @default(OTHER)
+  // Originating Woodivo product/blog id and display title, passed through by
+  // the caller at submission time (see ingest DTO) - lets Woodivo's CMS show
+  // "what was posted" without this service needing to know about products/blogs.
+  sourceId           String?
+  sourceTitle        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  startedAt          DateTime?
+  completedAt        DateTime?
+  failedAt           DateTime?
+
+  logs              PostLog[]
+  retries           RetryHistory[]
+  aiResponses       AiResponse[]
+  metaResponses     MetaResponse[]
+  publishingHistory PublishingHistory[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([sourceType])
+  @@map("publish_jobs")
+}
+
+model PostLog {
+  id        String     @id @default(auto()) @map("_id") @db.ObjectId
+  jobId     String     @db.ObjectId
+  job       PublishJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  level     LogLevel
+  message   String
+  context   Json?
+  createdAt DateTime   @default(now())
+
+  @@index([jobId])
+  @@map("post_logs")
+}
+
+model RetryHistory {
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String       @db.ObjectId
+  job         PublishJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  stage       PublishStage
+  attempt     Int
+  maxAttempts Int
+  error       String
+  willRetry   Boolean
+  createdAt   DateTime     @default(now())
+
+  @@index([jobId])
+  @@map("retry_history")
+}
+
+model AiResponse {
+  id             String     @id @default(auto()) @map("_id") @db.ObjectId
+  jobId          String     @db.ObjectId
+  job            PublishJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  provider       String
+  model          String?
+  prompt         String
+  rawResponse    String
+  parsedResponse Json?
+  isValid        Boolean    @default(false)
+  attempt        Int        @default(1)
+  createdAt      DateTime   @default(now())
+
+  @@index([jobId])
+  @@map("ai_responses")
+}
+
+model MetaResponse {
+  id              String         @id @default(auto()) @map("_id") @db.ObjectId
+  jobId           String         @db.ObjectId
+  job             PublishJob     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  platform        SocialPlatform
+  endpoint        String
+  requestPayload  Json
+  responsePayload Json
+  statusCode      Int?
+  success         Boolean
+  externalId      String?
+  createdAt       DateTime       @default(now())
+
+  @@index([jobId])
+  @@map("meta_responses")
+}
+
+model PublishingHistory {
+  id          String         @id @default(auto()) @map("_id") @db.ObjectId
+  jobId       String         @db.ObjectId
+  job         PublishJob     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  platform    SocialPlatform
+  externalId  String
+  permalink   String?
+  caption     String
+  publishedAt DateTime       @default(now())
+
+  @@index([jobId])
+  @@map("publishing_history")
+}

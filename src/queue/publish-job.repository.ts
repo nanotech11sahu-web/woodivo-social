@@ -1,0 +1,225 @@
+import { Injectable } from '@nestjs/common';
+import {
+  LogLevel,
+  PostSourceType as PrismaPostSourceType,
+  PublishJob,
+  PublishJobStatus,
+  PublishStage,
+  SocialPlatform,
+} from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { SocialContentResponseDto } from '../ai/dto/social-content-response.dto';
+import { SeoData } from '../parser/interfaces/seo-fields.interface';
+import { PostSourceType } from '../shared/interfaces/post-meta.interface';
+
+/**
+ * Centralizes every Prisma read/write the publishing pipeline needs, so
+ * queue processors depend on a single well-typed repository instead of
+ * scattering raw Prisma calls across the codebase.
+ */
+@Injectable()
+export class PublishJobRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  createProcessing(
+    folderName: string,
+    folderPath: string,
+    seoRawText: string,
+    source?: { sourceType: PostSourceType; sourceId?: string; sourceTitle?: string },
+  ): Promise<PublishJob> {
+    return this.prisma.publishJob.create({
+      data: {
+        folderName,
+        folderPath,
+        seoRawText,
+        status: PublishJobStatus.PROCESSING,
+        startedAt: new Date(),
+        sourceType: (source?.sourceType ?? 'OTHER') as PrismaPostSourceType,
+        sourceId: source?.sourceId,
+        sourceTitle: source?.sourceTitle,
+      },
+    });
+  }
+
+  findById(jobId: string): Promise<PublishJob | null> {
+    return this.prisma.publishJob.findUnique({ where: { id: jobId } });
+  }
+
+  async listJobs(
+    page: number,
+    limit: number,
+  ): Promise<{ items: Array<PublishJob & { publishingHistory: unknown[] }>; total: number }> {
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      this.prisma.publishJob.findMany({
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: { publishingHistory: true },
+      }),
+      this.prisma.publishJob.count(),
+    ]);
+    return { items, total };
+  }
+
+  findByIdWithHistory(jobId: string) {
+    return this.prisma.publishJob.findUnique({
+      where: { id: jobId },
+      include: { publishingHistory: true, retries: true },
+    });
+  }
+
+  updateFolderPath(jobId: string, folderPath: string): Promise<PublishJob> {
+    return this.prisma.publishJob.update({ where: { id: jobId }, data: { folderPath } });
+  }
+
+  setStatus(jobId: string, status: PublishJobStatus): Promise<PublishJob> {
+    return this.prisma.publishJob.update({ where: { id: jobId }, data: { status } });
+  }
+
+  setSeoParsed(jobId: string, seoParsed: SeoData): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: { seoParsed: seoParsed as unknown as object, status: PublishJobStatus.AI_GENERATING },
+    });
+  }
+
+  setMediaInfo(jobId: string, mediaType: string, mediaPath: string): Promise<PublishJob> {
+    return this.prisma.publishJob.update({ where: { id: jobId }, data: { mediaType, mediaPath } });
+  }
+
+  setGeneratedContent(jobId: string, content: SocialContentResponseDto): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: {
+        generatedContent: content as unknown as object,
+        status: PublishJobStatus.MEDIA_PROCESSING,
+      },
+    });
+  }
+
+  setProcessedMedia(jobId: string, processedMediaPath: string): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: { processedMediaPath, status: PublishJobStatus.PUBLISHING },
+    });
+  }
+
+  markCompleted(jobId: string, folderPath: string): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: {
+        status: PublishJobStatus.COMPLETED,
+        completedAt: new Date(),
+        folderPath,
+      },
+    });
+  }
+
+  markFailed(
+    jobId: string,
+    stage: PublishStage,
+    reason: string,
+    folderPath?: string,
+  ): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: {
+        status: PublishJobStatus.FAILED,
+        failedStage: stage,
+        failureReason: reason,
+        failedAt: new Date(),
+        ...(folderPath ? { folderPath } : {}),
+      },
+    });
+  }
+
+  addLog(jobId: string, level: LogLevel, message: string, context?: Record<string, unknown>) {
+    return this.prisma.postLog.create({
+      data: { jobId, level, message, context: context as unknown as object },
+    });
+  }
+
+  addRetryHistory(params: {
+    jobId: string;
+    stage: PublishStage;
+    attempt: number;
+    maxAttempts: number;
+    error: string;
+    willRetry: boolean;
+  }) {
+    return this.prisma.retryHistory.create({ data: params });
+  }
+
+  addAiResponse(params: {
+    jobId: string;
+    provider: string;
+    model?: string;
+    prompt: string;
+    rawResponse: string;
+    parsedResponse?: Record<string, unknown>;
+    isValid: boolean;
+    attempt: number;
+  }) {
+    return this.prisma.aiResponse.create({
+      data: {
+        ...params,
+        parsedResponse: params.parsedResponse as unknown as object,
+      },
+    });
+  }
+
+  addMetaResponse(params: {
+    jobId: string;
+    platform: SocialPlatform;
+    endpoint: string;
+    requestPayload: Record<string, unknown>;
+    responsePayload: Record<string, unknown>;
+    statusCode?: number;
+    success: boolean;
+    externalId?: string;
+  }) {
+    return this.prisma.metaResponse.create({
+      data: {
+        ...params,
+        requestPayload: params.requestPayload as unknown as object,
+        responsePayload: params.responsePayload as unknown as object,
+      },
+    });
+  }
+
+  async getPublishedPlatforms(jobId: string): Promise<SocialPlatform[]> {
+    const rows = await this.prisma.publishingHistory.findMany({
+      where: { jobId },
+      select: { platform: true },
+    });
+    return rows.map((row) => row.platform);
+  }
+
+  async getExternalId(jobId: string, platform: SocialPlatform): Promise<string | null> {
+    const row = await this.prisma.publishingHistory.findFirst({
+      where: { jobId, platform },
+      select: { externalId: true },
+    });
+    return row?.externalId ?? null;
+  }
+
+  /** Platforms where the first-comment has already been posted successfully for this job. */
+  async getCommentedPlatforms(jobId: string): Promise<SocialPlatform[]> {
+    const rows = await this.prisma.metaResponse.findMany({
+      where: { jobId, endpoint: { endsWith: '/comments' }, success: true },
+      select: { platform: true },
+    });
+    return rows.map((row) => row.platform);
+  }
+
+  addPublishingHistory(params: {
+    jobId: string;
+    platform: SocialPlatform;
+    externalId: string;
+    permalink?: string;
+    caption: string;
+  }) {
+    return this.prisma.publishingHistory.create({ data: params });
+  }
+}
