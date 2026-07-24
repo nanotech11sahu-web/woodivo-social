@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import * as os from 'os';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../config/app-config.service';
 import { MediaProcessingException } from '../shared/exceptions/app.exceptions';
-import { FilesystemUtil } from '../shared/utils/filesystem.util';
-import { ProcessedMediaResult } from './interfaces/media-processing-result.interface';
+import { ProcessedVideoResult } from './interfaces/media-processing-result.interface';
 
 interface ProbeResult {
   durationSec: number;
@@ -14,9 +16,16 @@ interface ProbeResult {
 }
 
 /**
- * Validates and processes video files with FFmpeg: probes duration/dimensions,
+ * Validates and processes video with FFmpeg: probes duration/dimensions,
  * enforces configured limits, then transcodes/compresses to a web-optimized
  * H.264/AAC MP4 within the target bitrate.
+ *
+ * FFmpeg needs real files, so the input buffer (downloaded from Cloudinary)
+ * is written to the OS temp directory just for the duration of this one
+ * call, and the caller is responsible for deleting the returned output file
+ * once it's uploaded back to Cloudinary. Nothing here is ever expected to
+ * survive a restart - it exists only for the few seconds this job is
+ * actively running.
  */
 @Injectable()
 export class VideoProcessorService {
@@ -51,7 +60,7 @@ export class VideoProcessorService {
     });
   }
 
-  async validate(filePath: string): Promise<ProbeResult> {
+  private async validate(filePath: string, sizeBytes: number): Promise<ProbeResult> {
     let probeResult: ProbeResult;
     try {
       probeResult = await this.probe(filePath);
@@ -59,87 +68,89 @@ export class VideoProcessorService {
       throw new MediaProcessingException(
         `File is not a valid or decodable video: ${(error as Error).message}`,
         false,
-        { filePath },
       );
     }
 
     if (!probeResult.durationSec || probeResult.durationSec <= 0) {
-      throw new MediaProcessingException('Video has no readable duration', false, { filePath });
+      throw new MediaProcessingException('Video has no readable duration', false);
     }
 
     if (probeResult.durationSec > this.appConfig.media.videoMaxDurationSec) {
       throw new MediaProcessingException(
         `Video duration (${probeResult.durationSec}s) exceeds maximum of ${this.appConfig.media.videoMaxDurationSec}s`,
         false,
-        { filePath, durationSec: probeResult.durationSec },
+        { durationSec: probeResult.durationSec },
       );
     }
 
-    const sizeBytes = await FilesystemUtil.getFileSize(filePath);
     if (sizeBytes > this.appConfig.media.videoMaxSizeBytes) {
       throw new MediaProcessingException(
         `Video exceeds maximum allowed size of ${this.appConfig.media.videoMaxSizeBytes} bytes`,
         false,
-        { filePath, sizeBytes },
+        { sizeBytes },
       );
     }
 
     return probeResult;
   }
 
-  async process(filePath: string, outputDir: string): Promise<ProcessedMediaResult> {
-    const probeResult = await this.validate(filePath);
-    const originalSizeBytes = await FilesystemUtil.getFileSize(filePath);
+  async process(buffer: Buffer): Promise<ProcessedVideoResult> {
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'woodivo-video-'));
+    const inputPath = path.join(workDir, `input-${randomUUID()}`);
+    const outputPath = path.join(workDir, `output-${randomUUID()}.mp4`);
 
-    await FilesystemUtil.ensureDir(outputDir);
-    const outputPath = path.join(outputDir, `${path.parse(filePath).name}-processed.mp4`);
-    const timeoutMs = this.appConfig.media.processingTimeoutMs;
+    try {
+      await fs.writeFile(inputPath, buffer);
+      const originalSizeBytes = buffer.byteLength;
+      const probeResult = await this.validate(inputPath, originalSizeBytes);
+      const timeoutMs = this.appConfig.media.processingTimeoutMs;
 
-    await new Promise<void>((resolve, reject) => {
-      const command = ffmpeg(filePath)
-        .videoCodec('libx264')
-        .audioCodec('aac')
-        .videoBitrate(this.appConfig.media.videoTargetBitrateKbps)
-        .outputOptions(['-preset veryfast', '-movflags +faststart', '-pix_fmt yuv420p'])
-        .output(outputPath);
+      await new Promise<void>((resolve, reject) => {
+        const command = ffmpeg(inputPath)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .videoBitrate(this.appConfig.media.videoTargetBitrateKbps)
+          .outputOptions(['-preset veryfast', '-movflags +faststart', '-pix_fmt yuv420p'])
+          .output(outputPath);
 
-      const timer = setTimeout(() => {
-        command.kill('SIGKILL');
-        reject(new Error(`Video processing timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+        const timer = setTimeout(() => {
+          command.kill('SIGKILL');
+          reject(new Error(`Video processing timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
 
-      command
-        .on('end', () => {
-          clearTimeout(timer);
-          resolve();
-        })
-        .on('error', (error: Error) => {
-          clearTimeout(timer);
-          reject(error);
-        })
-        .run();
-    }).catch((error: Error) => {
-      throw new MediaProcessingException(`Failed to process video: ${error.message}`, true, {
-        filePath,
-        probeResult,
+        command
+          .on('end', () => {
+            clearTimeout(timer);
+            resolve();
+          })
+          .on('error', (error: Error) => {
+            clearTimeout(timer);
+            reject(error);
+          })
+          .run();
+      }).catch((error: Error) => {
+        throw new MediaProcessingException(`Failed to process video: ${error.message}`, true, {
+          probeResult,
+        });
       });
-    });
 
-    const processedSizeBytes = await FilesystemUtil.getFileSize(outputPath);
+      const processedSizeBytes = (await fs.stat(outputPath)).size;
 
-    this.logger.info(
-      { filePath, outputPath, originalSizeBytes, processedSizeBytes },
-      'Video processed successfully',
-    );
+      this.logger.info({ originalSizeBytes, processedSizeBytes }, 'Video processed successfully');
 
-    return {
-      outputPath,
-      originalSizeBytes,
-      processedSizeBytes,
-      width: probeResult.width,
-      height: probeResult.height,
-      durationSec: probeResult.durationSec,
-      format: 'mp4',
-    };
+      return {
+        filePath: outputPath,
+        cleanup: () => fs.rm(workDir, { recursive: true, force: true }),
+        originalSizeBytes,
+        processedSizeBytes,
+        width: probeResult.width,
+        height: probeResult.height,
+        durationSec: probeResult.durationSec,
+        format: 'mp4',
+      };
+    } catch (error) {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 }

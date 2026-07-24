@@ -12,6 +12,18 @@ import { SocialContentResponseDto } from '../ai/dto/social-content-response.dto'
 import { SeoData } from '../parser/interfaces/seo-fields.interface';
 import { PostSourceType } from '../shared/interfaces/post-meta.interface';
 
+export interface CreatePendingJobParams {
+  reference: string;
+  seoRawText: string;
+  mediaType: 'IMAGE' | 'VIDEO';
+  mediaUrl: string;
+  mediaPublicId: string;
+  sourceType: PostSourceType;
+  sourceId?: string;
+  sourceTitle?: string;
+  urgent: boolean;
+}
+
 /**
  * Centralizes every Prisma read/write the publishing pipeline needs, so
  * queue processors depend on a single well-typed repository instead of
@@ -21,28 +33,46 @@ import { PostSourceType } from '../shared/interfaces/post-meta.interface';
 export class PublishJobRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  createProcessing(
-    folderName: string,
-    folderPath: string,
-    seoRawText: string,
-    source?: { sourceType: PostSourceType; sourceId?: string; sourceTitle?: string },
-  ): Promise<PublishJob> {
+  /**
+   * Created immediately when a post is submitted (see IngestController) -
+   * status PENDING until the scheduler picks it up. Media is already in
+   * Cloudinary by this point, so this row (durable in MongoDB) is the only
+   * thing that has to survive between submission and the scheduled slot.
+   */
+  createPending(params: CreatePendingJobParams): Promise<PublishJob> {
     return this.prisma.publishJob.create({
       data: {
-        folderName,
-        folderPath,
-        seoRawText,
-        status: PublishJobStatus.PROCESSING,
-        startedAt: new Date(),
-        sourceType: (source?.sourceType ?? 'OTHER') as PrismaPostSourceType,
-        sourceId: source?.sourceId,
-        sourceTitle: source?.sourceTitle,
+        reference: params.reference,
+        seoRawText: params.seoRawText,
+        mediaType: params.mediaType,
+        mediaUrl: params.mediaUrl,
+        mediaPublicId: params.mediaPublicId,
+        status: PublishJobStatus.PENDING,
+        sourceType: params.sourceType as PrismaPostSourceType,
+        sourceId: params.sourceId,
+        sourceTitle: params.sourceTitle,
+        urgent: params.urgent,
       },
     });
   }
 
   findById(jobId: string): Promise<PublishJob | null> {
     return this.prisma.publishJob.findUnique({ where: { id: jobId } });
+  }
+
+  /** All PENDING jobs, urgent first then oldest first - see SchedulerService for the per-type pick. */
+  findPending(): Promise<PublishJob[]> {
+    return this.prisma.publishJob.findMany({
+      where: { status: PublishJobStatus.PENDING },
+      orderBy: [{ urgent: 'desc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  markProcessing(jobId: string): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: { status: PublishJobStatus.PROCESSING, startedAt: new Date() },
+    });
   }
 
   async listJobs(
@@ -69,10 +99,6 @@ export class PublishJobRepository {
     });
   }
 
-  updateFolderPath(jobId: string, folderPath: string): Promise<PublishJob> {
-    return this.prisma.publishJob.update({ where: { id: jobId }, data: { folderPath } });
-  }
-
   setStatus(jobId: string, status: PublishJobStatus): Promise<PublishJob> {
     return this.prisma.publishJob.update({ where: { id: jobId }, data: { status } });
   }
@@ -82,10 +108,6 @@ export class PublishJobRepository {
       where: { id: jobId },
       data: { seoParsed: seoParsed as unknown as object, status: PublishJobStatus.AI_GENERATING },
     });
-  }
-
-  setMediaInfo(jobId: string, mediaType: string, mediaPath: string): Promise<PublishJob> {
-    return this.prisma.publishJob.update({ where: { id: jobId }, data: { mediaType, mediaPath } });
   }
 
   setGeneratedContent(jobId: string, content: SocialContentResponseDto): Promise<PublishJob> {
@@ -98,30 +120,25 @@ export class PublishJobRepository {
     });
   }
 
-  setProcessedMedia(jobId: string, processedMediaPath: string): Promise<PublishJob> {
-    return this.prisma.publishJob.update({
-      where: { id: jobId },
-      data: { processedMediaPath, status: PublishJobStatus.PUBLISHING },
-    });
-  }
-
-  markCompleted(jobId: string, folderPath: string): Promise<PublishJob> {
-    return this.prisma.publishJob.update({
-      where: { id: jobId },
-      data: {
-        status: PublishJobStatus.COMPLETED,
-        completedAt: new Date(),
-        folderPath,
-      },
-    });
-  }
-
-  markFailed(
+  setProcessedMedia(
     jobId: string,
-    stage: PublishStage,
-    reason: string,
-    folderPath?: string,
+    processedMediaUrl: string,
+    processedMediaPublicId: string,
   ): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: { processedMediaUrl, processedMediaPublicId, status: PublishJobStatus.PUBLISHING },
+    });
+  }
+
+  markCompleted(jobId: string): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: { status: PublishJobStatus.COMPLETED, completedAt: new Date() },
+    });
+  }
+
+  markFailed(jobId: string, stage: PublishStage, reason: string): Promise<PublishJob> {
     return this.prisma.publishJob.update({
       where: { id: jobId },
       data: {
@@ -129,7 +146,6 @@ export class PublishJobRepository {
         failedStage: stage,
         failureReason: reason,
         failedAt: new Date(),
-        ...(folderPath ? { folderPath } : {}),
       },
     });
   }

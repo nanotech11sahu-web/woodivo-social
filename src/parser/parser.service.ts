@@ -3,7 +3,6 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { PinoLogger } from 'nestjs-pino';
 import { SeoParseException } from '../shared/exceptions/app.exceptions';
-import { FilesystemUtil } from '../shared/utils/filesystem.util';
 import { SeoDataDto } from './dto/seo-data.dto';
 import { SEO_FIELD_ALIASES, SeoData } from './interfaces/seo-fields.interface';
 
@@ -17,11 +16,6 @@ import { SEO_FIELD_ALIASES, SeoData } from './interfaces/seo-fields.interface';
 export class ParserService {
   constructor(private readonly logger: PinoLogger) {
     this.logger.setContext(ParserService.name);
-  }
-
-  async parseSeoFile(filePath: string): Promise<SeoData> {
-    const raw = await FilesystemUtil.readTextFile(filePath);
-    return this.parseSeoText(raw);
   }
 
   parseSeoText(raw: string): SeoData {

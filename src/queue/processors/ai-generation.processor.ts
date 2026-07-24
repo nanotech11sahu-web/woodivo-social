@@ -1,25 +1,22 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
-import * as path from 'path';
 import { Job } from 'bullmq';
 import { LogLevel } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
 import { AiService } from '../../ai/ai.service';
 import { ParserService } from '../../parser/parser.service';
-import {
-  MEDIA_EXTENSIONS,
-  SEO_FILENAME,
-  QUEUE_NAMES,
-} from '../../shared/constants/queue.constants';
+import { QUEUE_NAMES } from '../../shared/constants/queue.constants';
 import { AiGenerationJobPayload } from '../../shared/interfaces/job-payloads.interface';
 import { MediaType } from '../../shared/interfaces/media-type.enum';
-import { FilesystemUtil } from '../../shared/utils/filesystem.util';
 import { PublishJobRepository } from '../publish-job.repository';
 import { PipelineFailureRecorder } from '../pipeline-failure-recorder.service';
 import { MediaProcessingProducer } from '../producers/media-processing.producer';
 
 /**
- * Stage 1: parses seo.txt and calls AiService.generateSocialContent(), then
- * advances the pipeline by enqueueing the media-processing job.
+ * Stage 1: parses the job's seo text and calls
+ * AiService.generateSocialContent(), then advances the pipeline by
+ * enqueueing the media-processing job. Media itself already lives in
+ * Cloudinary (uploaded at submission time) - this stage only reads the DB
+ * job record, no filesystem access at all.
  */
 @Processor(QUEUE_NAMES.AI_GENERATION)
 export class AiGenerationProcessor extends WorkerHost {
@@ -36,10 +33,17 @@ export class AiGenerationProcessor extends WorkerHost {
   }
 
   async process(job: Job<AiGenerationJobPayload>): Promise<void> {
-    const { jobId, folderPath } = job.data;
+    const { jobId, reference } = job.data;
 
-    const seoFilePath = path.join(folderPath, SEO_FILENAME);
-    const seo = await this.parserService.parseSeoFile(seoFilePath);
+    const record = await this.jobRepository.findById(jobId);
+    if (!record) {
+      throw new Error(`PublishJob ${jobId} not found`);
+    }
+    if (!record.mediaUrl || !record.mediaType) {
+      throw new Error(`PublishJob ${jobId} is missing media information`);
+    }
+
+    const seo = this.parserService.parseSeoText(record.seoRawText);
     await this.jobRepository.setSeoParsed(jobId, seo);
 
     const generated = await this.aiService.generateSocialContent(seo);
@@ -58,25 +62,11 @@ export class AiGenerationProcessor extends WorkerHost {
     await this.jobRepository.setGeneratedContent(jobId, generated.content);
     await this.jobRepository.addLog(jobId, LogLevel.INFO, 'AI content generated successfully');
 
-    const files = await FilesystemUtil.listFiles(folderPath);
-    const imageFile = FilesystemUtil.findFileByExtensions(files, MEDIA_EXTENSIONS.IMAGE);
-    const videoFile = FilesystemUtil.findFileByExtensions(files, MEDIA_EXTENSIONS.VIDEO);
-    const mediaFile = imageFile ?? videoFile;
-    const mediaType = imageFile ? MediaType.IMAGE : MediaType.VIDEO;
-
-    if (!mediaFile) {
-      throw new Error('No media file (image or video) found in post folder during AI stage');
-    }
-
-    const mediaPath = path.join(folderPath, mediaFile);
-    await this.jobRepository.setMediaInfo(jobId, mediaType, mediaPath);
-
     await this.mediaProcessingProducer.enqueue({
       jobId,
-      folderName: job.data.folderName,
-      folderPath,
-      mediaType,
-      mediaPath,
+      reference,
+      mediaType: record.mediaType as MediaType,
+      mediaUrl: record.mediaUrl,
     });
   }
 

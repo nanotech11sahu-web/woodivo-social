@@ -1,16 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  CloudinaryConfig,
   GroqConfig,
   IngestConfig,
   MailConfig,
   MediaConfig,
   MetaConfig,
-  PublicMediaConfig,
   QueueRetryConfig,
   RedisConfig,
   SchedulerConfig,
-  SocialPostsConfig,
   WoodivoConfiguration,
 } from './configuration';
 
@@ -23,10 +22,6 @@ export class AppConfigService {
 
   get app() {
     return this.configService.get('app', { infer: true });
-  }
-
-  get socialPosts(): SocialPostsConfig {
-    return this.configService.get('socialPosts', { infer: true });
   }
 
   get scheduler(): SchedulerConfig {
@@ -45,8 +40,8 @@ export class AppConfigService {
     return this.configService.get('meta', { infer: true });
   }
 
-  get publicMedia(): PublicMediaConfig {
-    return this.configService.get('publicMedia', { infer: true });
+  get cloudinary(): CloudinaryConfig {
+    return this.configService.get('cloudinary', { infer: true });
   }
 
   get groq(): GroqConfig {

@@ -3,26 +3,22 @@ import { MediaType } from './media-type.enum';
 /** Payload carried through every stage of the BullMQ pipeline for a single post. */
 export interface PostJobPayload {
   jobId: string; // PublishJob.id (Prisma)
-  folderName: string;
-  folderPath: string; // current absolute path (moves as it transitions state)
+  reference: string; // human-readable label for logs/emails, not a filesystem path
 }
 
 export type AiGenerationJobPayload = PostJobPayload;
 
 export interface MediaProcessingJobPayload extends PostJobPayload {
   mediaType: MediaType;
-  mediaPath: string;
+  mediaUrl: string; // Cloudinary URL
 }
 
 export interface PublishingJobPayload extends PostJobPayload {
   mediaType: MediaType;
-  processedMediaPath: string;
+  processedMediaUrl: string; // Cloudinary URL
 }
 
-export interface ArchivingJobPayload extends PostJobPayload {
-  success: boolean;
-  failureReason?: string;
-}
+export type ArchivingJobPayload = PostJobPayload;
 
 export type PublishStageName =
   'VALIDATION' | 'AI_GENERATION' | 'MEDIA_PROCESSING' | 'PUBLISHING' | 'ARCHIVING';

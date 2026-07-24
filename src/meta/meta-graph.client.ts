@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
-import FormData from 'form-data';
-import { createReadStream } from 'fs';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../config/app-config.service';
 import { MetaPublishException } from '../shared/exceptions/app.exceptions';
@@ -49,28 +47,6 @@ export class MetaGraphClient {
   ): Promise<MetaApiResult<T>> {
     try {
       const response = await this.client.post<T>(endpoint, null, { params });
-      return { data: response.data, statusCode: response.status };
-    } catch (error) {
-      throw this.toMetaException(error, endpoint);
-    }
-  }
-
-  /** Multipart upload for endpoints that accept a binary `source` file (e.g. Page photos/videos). */
-  async postFile<T = Record<string, unknown>>(
-    endpoint: string,
-    filePath: string,
-    fields: Record<string, string | number | boolean>,
-  ): Promise<MetaApiResult<T>> {
-    try {
-      const form = new FormData();
-      Object.entries(fields).forEach(([key, value]) => form.append(key, String(value)));
-      form.append('source', createReadStream(filePath));
-
-      const response = await this.client.post<T>(endpoint, form, {
-        headers: form.getHeaders(),
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      });
       return { data: response.data, statusCode: response.status };
     } catch (error) {
       throw this.toMetaException(error, endpoint);

@@ -1,16 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import * as path from 'path';
 import sharp from 'sharp';
 import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../config/app-config.service';
 import { MediaProcessingException } from '../shared/exceptions/app.exceptions';
-import { FilesystemUtil } from '../shared/utils/filesystem.util';
-import { ProcessedMediaResult } from './interfaces/media-processing-result.interface';
+import { ProcessedImageResult } from './interfaces/media-processing-result.interface';
 
 /**
- * Validates and processes still images with Sharp: verifies the file is a
- * genuine, decodable image, then resizes (bounded box, preserves aspect
- * ratio, never upscales) and compresses to JPEG within configured limits.
+ * Validates and processes still images with Sharp, entirely in memory:
+ * verifies the buffer is a genuine, decodable image, then resizes (bounded
+ * box, preserves aspect ratio, never upscales) and compresses to JPEG within
+ * configured limits. No local disk involved.
  */
 @Injectable()
 export class ImageProcessorService {
@@ -21,43 +20,38 @@ export class ImageProcessorService {
     this.logger.setContext(ImageProcessorService.name);
   }
 
-  async validate(filePath: string): Promise<sharp.Metadata> {
+  async validate(buffer: Buffer): Promise<sharp.Metadata> {
     let metadata: sharp.Metadata;
     try {
-      metadata = await sharp(filePath).metadata();
+      metadata = await sharp(buffer).metadata();
     } catch (error) {
       throw new MediaProcessingException(
         `File is not a valid or decodable image: ${(error as Error).message}`,
         false,
-        { filePath },
       );
     }
 
     if (!metadata.width || !metadata.height) {
-      throw new MediaProcessingException('Image has no readable dimensions', false, { filePath });
+      throw new MediaProcessingException('Image has no readable dimensions', false);
     }
 
-    const sizeBytes = await FilesystemUtil.getFileSize(filePath);
-    if (sizeBytes > this.appConfig.media.imageMaxSizeBytes) {
+    if (buffer.byteLength > this.appConfig.media.imageMaxSizeBytes) {
       throw new MediaProcessingException(
         `Image exceeds maximum allowed size of ${this.appConfig.media.imageMaxSizeBytes} bytes`,
         false,
-        { filePath, sizeBytes },
+        { sizeBytes: buffer.byteLength },
       );
     }
 
     return metadata;
   }
 
-  async process(filePath: string, outputDir: string): Promise<ProcessedMediaResult> {
-    const metadata = await this.validate(filePath);
-    const originalSizeBytes = await FilesystemUtil.getFileSize(filePath);
-
-    await FilesystemUtil.ensureDir(outputDir);
-    const outputPath = path.join(outputDir, `${path.parse(filePath).name}-processed.jpg`);
+  async process(buffer: Buffer): Promise<ProcessedImageResult> {
+    const metadata = await this.validate(buffer);
+    const originalSizeBytes = buffer.byteLength;
 
     try {
-      const pipeline = sharp(filePath)
+      const pipeline = sharp(buffer)
         .rotate() // apply EXIF orientation
         .resize({
           width: this.appConfig.media.imageMaxWidth,
@@ -67,15 +61,15 @@ export class ImageProcessorService {
         })
         .jpeg({ quality: this.appConfig.media.imageJpegQuality, mozjpeg: true });
 
-      const info = await pipeline.toFile(outputPath);
+      const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
 
       this.logger.info(
-        { filePath, outputPath, originalSizeBytes, processedSizeBytes: info.size },
+        { originalSizeBytes, processedSizeBytes: info.size },
         'Image processed successfully',
       );
 
       return {
-        outputPath,
+        buffer: data,
         originalSizeBytes,
         processedSizeBytes: info.size,
         width: info.width,
@@ -86,7 +80,7 @@ export class ImageProcessorService {
       throw new MediaProcessingException(
         `Failed to process image: ${(error as Error).message}`,
         true,
-        { filePath, metadata },
+        { metadata },
       );
     }
   }

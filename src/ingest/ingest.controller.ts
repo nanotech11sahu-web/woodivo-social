@@ -16,12 +16,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import { promises as fs } from 'fs';
 import { PinoLogger } from 'nestjs-pino';
-import { AppConfigService } from '../config/app-config.service';
-import { MEDIA_EXTENSIONS, SEO_FILENAME } from '../shared/constants/queue.constants';
-import { FilesystemUtil } from '../shared/utils/filesystem.util';
-import { PostMetaUtil } from '../shared/utils/post-meta.util';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { MEDIA_EXTENSIONS } from '../shared/constants/queue.constants';
+import { MediaType } from '../shared/interfaces/media-type.enum';
 import { PublishJobRepository } from '../queue/publish-job.repository';
 import { SchedulerService } from '../scheduler/scheduler.service';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -35,13 +33,16 @@ const SUPPORTED_EXTENSIONS = [...MEDIA_EXTENSIONS.IMAGE, ...MEDIA_EXTENSIONS.VID
  * HTTP hand-off for post creation. Exists so Woodivo's backend can submit a
  * finished post (media + seo.txt content) to this app over the network when
  * the two are deployed as separate services and can't share a filesystem.
- * Writes into this app's OWN pending/ folder - the scheduler then picks it
- * up exactly as if it had appeared there directly, no pipeline changes needed.
+ *
+ * Media is uploaded straight to Cloudinary and the PublishJob row is created
+ * immediately with status PENDING - nothing about a submitted post depends
+ * on local disk, so it survives container restarts/redeploys between now and
+ * whenever the scheduler picks it up.
  */
 @Controller('posts')
 export class IngestController {
   constructor(
-    private readonly appConfig: AppConfigService,
+    private readonly cloudinaryService: CloudinaryService,
     private readonly jobRepository: PublishJobRepository,
     private readonly schedulerService: SchedulerService,
     private readonly logger: PinoLogger,
@@ -56,7 +57,7 @@ export class IngestController {
   async create(
     @Body() dto: CreatePostDto,
     @UploadedFile() file?: Express.Multer.File,
-  ): Promise<{ folderName: string; status: string }> {
+  ): Promise<{ reference: string; jobId: string; status: string }> {
     if (!file) {
       throw new BadRequestException('Multipart field "media" (image or video file) is required');
     }
@@ -68,13 +69,23 @@ export class IngestController {
       );
     }
 
-    const folderName = `post-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const folderPath = path.join(this.appConfig.socialPosts.pendingDir, folderName);
+    const mediaType = (MEDIA_EXTENSIONS.IMAGE as readonly string[]).includes(extension)
+      ? MediaType.IMAGE
+      : MediaType.VIDEO;
 
-    await FilesystemUtil.ensureDir(folderPath);
-    await fs.writeFile(path.join(folderPath, SEO_FILENAME), dto.seo, 'utf-8');
-    await fs.writeFile(path.join(folderPath, `media${extension}`), file.buffer);
-    await PostMetaUtil.write(folderPath, {
+    const upload = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      mediaType === MediaType.IMAGE ? 'image' : 'video',
+    );
+
+    const reference = `post-${Date.now()}-${randomUUID().slice(0, 8)}`;
+
+    const job = await this.jobRepository.createPending({
+      reference,
+      seoRawText: dto.seo,
+      mediaType,
+      mediaUrl: upload.secureUrl,
+      mediaPublicId: upload.publicId,
       sourceType: dto.sourceType ?? 'OTHER',
       sourceId: dto.sourceId,
       sourceTitle: dto.sourceTitle,
@@ -83,19 +94,19 @@ export class IngestController {
 
     this.logger.info(
       {
-        folderName,
-        originalFilename: file.originalname,
+        jobId: job.id,
+        reference,
         sourceType: dto.sourceType ?? 'OTHER',
         urgent: dto.urgent ?? false,
       },
       'Post received via ingest API',
     );
 
-    return { folderName, status: 'queued' };
+    return { reference, jobId: job.id, status: 'pending' };
   }
 
   /**
-   * Processes pending folders right now instead of waiting for the next
+   * Processes pending jobs right now instead of waiting for the next
    * scheduled slot - called by Woodivo right after submitting an urgent
    * ("Post Now") post so it doesn't sit until the next 10am/1pm/5pm/8pm run.
    */

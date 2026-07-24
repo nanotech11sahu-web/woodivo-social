@@ -21,9 +21,3 @@ export const MEDIA_EXTENSIONS = {
   IMAGE: ['.jpg', '.jpeg', '.png', '.webp'],
   VIDEO: ['.mp4', '.mov', '.m4v'],
 } as const;
-
-export const SEO_FILENAME = 'seo.txt';
-
-// Written into a post folder alongside seo.txt/media by IngestController,
-// read by SchedulerService to group pending folders by content type.
-export const POST_META_FILENAME = '.social-meta.json';

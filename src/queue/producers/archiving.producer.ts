@@ -8,19 +8,19 @@ import { ArchivingJobPayload } from '../../shared/interfaces/job-payloads.interf
 export class ArchivingProducer {
   constructor(@InjectQueue(QUEUE_NAMES.ARCHIVING) private readonly queue: Queue) {}
 
-  async enqueueSuccess(payload: Omit<ArchivingJobPayload, 'success'>): Promise<void> {
-    await this.queue.add(
-      JOB_NAMES.ARCHIVE_COMPLETED,
-      { ...payload, success: true },
-      { attempts: 3, backoff: { type: 'exponential', delay: 3000 }, removeOnComplete: true },
-    );
+  async enqueueSuccess(payload: ArchivingJobPayload): Promise<void> {
+    await this.queue.add(JOB_NAMES.ARCHIVE_COMPLETED, payload, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 3000 },
+      removeOnComplete: true,
+    });
   }
 
-  async enqueueFailure(payload: Omit<ArchivingJobPayload, 'success'>): Promise<void> {
-    await this.queue.add(
-      JOB_NAMES.ARCHIVE_FAILED,
-      { ...payload, success: false },
-      { attempts: 3, backoff: { type: 'exponential', delay: 3000 }, removeOnComplete: true },
-    );
+  async enqueueFailure(payload: ArchivingJobPayload): Promise<void> {
+    await this.queue.add(JOB_NAMES.ARCHIVE_FAILED, payload, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 3000 },
+      removeOnComplete: true,
+    });
   }
 }

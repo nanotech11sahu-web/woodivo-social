@@ -12,9 +12,9 @@ import { ArchivingProducer } from '../producers/archiving.producer';
 /**
  * Central bookkeeping point for every stage failure across the pipeline.
  * Records a RetryHistory row and, once the stage has exhausted its configured
- * retry budget, marks the job FAILED, sends a failure email, and routes the
- * post folder to the failed-archiving queue. A failure processed here NEVER
- * throws back into the scheduler - each post is isolated from every other.
+ * retry budget, marks the job FAILED, sends a failure email, and routes it to
+ * the archiving queue. A failure processed here NEVER throws back into the
+ * scheduler - each post is isolated from every other.
  */
 @Processor(QUEUE_NAMES.RETRY)
 export class RetryProcessor extends WorkerHost {
@@ -30,7 +30,7 @@ export class RetryProcessor extends WorkerHost {
   }
 
   async process(job: Job<RetryJobPayload>): Promise<void> {
-    const { jobId, folderName, folderPath, stage, attempt, error } = job.data;
+    const { jobId, reference, stage, attempt, error } = job.data;
     const maxAttempts = this.appConfig.queueRetry.maxRetries;
     const willRetry = attempt < maxAttempts;
 
@@ -62,14 +62,14 @@ export class RetryProcessor extends WorkerHost {
 
       await this.mailService.sendFailureNotification({
         jobId,
-        folderName,
+        reference,
         stage,
         reason: error,
         attempts: attempt,
         occurredAt: new Date(),
       });
 
-      await this.archivingProducer.enqueueFailure({ jobId, folderName, folderPath });
+      await this.archivingProducer.enqueueFailure({ jobId, reference });
     } catch (bookkeepingError) {
       this.logger.error(
         { jobId, error: (bookkeepingError as Error).message },

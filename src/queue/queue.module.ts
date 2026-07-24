@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
 import { AppConfigService } from '../config/app-config.service';
 import { ConfigModule } from '../config/config.module';
-import { ArchiveModule } from '../archive/archive.module';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { FacebookModule } from '../facebook/facebook.module';
 import { InstagramModule } from '../instagram/instagram.module';
 import { MailModule } from '../mail/mail.module';
@@ -49,9 +49,9 @@ import { RetryProcessor } from './processors/retry.processor';
     ParserModule,
     AiModule,
     MediaModule,
+    CloudinaryModule,
     FacebookModule,
     InstagramModule,
-    ArchiveModule,
     MailModule,
   ],
   providers: [

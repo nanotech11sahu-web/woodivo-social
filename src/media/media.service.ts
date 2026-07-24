@@ -1,17 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import * as path from 'path';
 import { MediaType } from '../shared/interfaces/media-type.enum';
-import { MEDIA_EXTENSIONS } from '../shared/constants/queue.constants';
-import { MediaProcessingException } from '../shared/exceptions/app.exceptions';
 import { ImageProcessorService } from './image-processor.service';
 import { VideoProcessorService } from './video-processor.service';
-import { MediaItem, ProcessedMediaResult } from './interfaces/media-processing-result.interface';
+import {
+  ProcessedImageResult,
+  ProcessedVideoResult,
+} from './interfaces/media-processing-result.interface';
+
+export type ProcessedMedia =
+  | ({ mediaType: MediaType.IMAGE } & ProcessedImageResult)
+  | ({ mediaType: MediaType.VIDEO } & ProcessedVideoResult);
 
 /**
- * Public entry point for media handling. Detects whether a file is an image
- * or video and delegates to the appropriate processor. Also exposes
- * processCarousel() for future multi-media posts - each item is processed
- * independently so a carousel is simply an ordered list of single-item results.
+ * Public entry point for media handling. Delegates to Sharp (images) or
+ * FFmpeg (video) based on mediaType. Also exposes processMany() for future
+ * carousel posts - each item is processed independently so a carousel is
+ * simply an ordered list of single-item results.
  */
 @Injectable()
 export class MediaService {
@@ -20,30 +24,21 @@ export class MediaService {
     private readonly videoProcessor: VideoProcessorService,
   ) {}
 
-  detectMediaType(filePath: string): MediaType {
-    const ext = path.extname(filePath).toLowerCase();
-    if ((MEDIA_EXTENSIONS.IMAGE as readonly string[]).includes(ext)) {
-      return MediaType.IMAGE;
+  async processSingle(buffer: Buffer, mediaType: MediaType): Promise<ProcessedMedia> {
+    if (mediaType === MediaType.IMAGE) {
+      const result = await this.imageProcessor.process(buffer);
+      return { mediaType: MediaType.IMAGE, ...result };
     }
-    if ((MEDIA_EXTENSIONS.VIDEO as readonly string[]).includes(ext)) {
-      return MediaType.VIDEO;
-    }
-    throw new MediaProcessingException(`Unsupported media file extension: ${ext}`, false, {
-      filePath,
-    });
+    const result = await this.videoProcessor.process(buffer);
+    return { mediaType: MediaType.VIDEO, ...result };
   }
 
-  async processSingle(filePath: string, outputDir: string): Promise<ProcessedMediaResult> {
-    const mediaType = this.detectMediaType(filePath);
-    return mediaType === MediaType.IMAGE
-      ? this.imageProcessor.process(filePath, outputDir)
-      : this.videoProcessor.process(filePath, outputDir);
-  }
-
-  async processCarousel(items: MediaItem[], outputDir: string): Promise<ProcessedMediaResult[]> {
-    const results: ProcessedMediaResult[] = [];
+  async processMany(
+    items: Array<{ buffer: Buffer; mediaType: MediaType }>,
+  ): Promise<ProcessedMedia[]> {
+    const results: ProcessedMedia[] = [];
     for (const item of items) {
-      results.push(await this.processSingle(item.sourcePath, outputDir));
+      results.push(await this.processSingle(item.buffer, item.mediaType));
     }
     return results;
   }

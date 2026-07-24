@@ -7,13 +7,4 @@ coverage/
 npm-debug.log*
 .DS_Store
 
-social-posts/pending/*
-social-posts/processing/*
-social-posts/completed/*
-social-posts/failed/*
-!social-posts/pending/.gitkeep
-!social-posts/processing/.gitkeep
-!social-posts/completed/.gitkeep
-!social-posts/failed/.gitkeep
-
 prisma/migrations/**/migration.sql.bak

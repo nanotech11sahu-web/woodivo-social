@@ -17,7 +17,9 @@ interface FacebookVideoResponse {
 
 /**
  * Publishes content to a Facebook Page via the Meta Graph API. This is the
- * only class aware of Facebook-specific endpoint shapes.
+ * only class aware of Facebook-specific endpoint shapes. Publishes from a
+ * public media URL (Cloudinary) rather than a direct binary upload, so it
+ * needs no local file access - same approach as InstagramService.
  */
 @Injectable()
 export class FacebookService {
@@ -30,7 +32,7 @@ export class FacebookService {
   }
 
   async publish(
-    mediaPath: string,
+    mediaUrl: string,
     mediaType: MediaType,
     caption: string,
   ): Promise<SocialPublishResult> {
@@ -43,11 +45,12 @@ export class FacebookService {
     }
 
     if (mediaType === MediaType.IMAGE) {
-      const result = await this.graphClient.postFile<FacebookPhotoResponse>(
-        `/${pageId}/photos`,
-        mediaPath,
-        { caption, published: true, access_token: pageAccessToken },
-      );
+      const result = await this.graphClient.post<FacebookPhotoResponse>(`/${pageId}/photos`, {
+        url: mediaUrl,
+        caption,
+        published: true,
+        access_token: pageAccessToken,
+      });
       const externalId = result.data.post_id ?? result.data.id;
       this.logger.info({ externalId }, 'Published photo to Facebook Page');
       return {
@@ -57,11 +60,12 @@ export class FacebookService {
       };
     }
 
-    const result = await this.graphClient.postFile<FacebookVideoResponse>(
-      `/${pageId}/videos`,
-      mediaPath,
-      { description: caption, published: true, access_token: pageAccessToken },
-    );
+    const result = await this.graphClient.post<FacebookVideoResponse>(`/${pageId}/videos`, {
+      file_url: mediaUrl,
+      description: caption,
+      published: true,
+      access_token: pageAccessToken,
+    });
     this.logger.info({ externalId: result.data.id }, 'Published video to Facebook Page');
     return {
       externalId: result.data.id,

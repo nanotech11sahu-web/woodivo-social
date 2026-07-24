@@ -1,17 +1,7 @@
-import * as path from 'path';
-
 export interface AppConfig {
   nodeEnv: string;
   port: number;
   appName: string;
-}
-
-export interface SocialPostsConfig {
-  rootDir: string;
-  pendingDir: string;
-  processingDir: string;
-  completedDir: string;
-  failedDir: string;
 }
 
 export interface SchedulerConfig {
@@ -44,9 +34,10 @@ export interface MetaConfig {
   requestTimeoutMs: number;
 }
 
-export interface PublicMediaConfig {
-  baseUrl: string;
-  dir: string;
+export interface CloudinaryConfig {
+  cloudName: string;
+  apiKey: string;
+  apiSecret: string;
 }
 
 export interface GroqConfig {
@@ -92,12 +83,11 @@ export interface IngestConfig {
 
 export interface WoodivoConfiguration {
   app: AppConfig;
-  socialPosts: SocialPostsConfig;
   scheduler: SchedulerConfig;
   queueRetry: QueueRetryConfig;
   redis: RedisConfig;
   meta: MetaConfig;
-  publicMedia: PublicMediaConfig;
+  cloudinary: CloudinaryConfig;
   groq: GroqConfig;
   media: MediaConfig;
   mail: MailConfig;
@@ -105,27 +95,12 @@ export interface WoodivoConfiguration {
   ingest: IngestConfig;
 }
 
-const resolvePath = (base: string, segment: string): string => {
-  return path.isAbsolute(base)
-    ? path.join(base, segment)
-    : path.resolve(process.cwd(), base, segment);
-};
-
 export default (): WoodivoConfiguration => {
-  const rootDir = process.env.SOCIAL_POSTS_ROOT_DIR ?? './social-posts';
-
   return {
     app: {
       nodeEnv: process.env.NODE_ENV ?? 'development',
       port: parseInt(process.env.PORT ?? '3000', 10),
       appName: process.env.APP_NAME ?? 'woodivo-social-publisher',
-    },
-    socialPosts: {
-      rootDir,
-      pendingDir: resolvePath(rootDir, 'pending'),
-      processingDir: resolvePath(rootDir, 'processing'),
-      completedDir: resolvePath(rootDir, 'completed'),
-      failedDir: resolvePath(rootDir, 'failed'),
     },
     scheduler: {
       cronExpression: process.env.SCHEDULER_CRON_EXPRESSION ?? '*/30 * * * * *',
@@ -153,9 +128,10 @@ export default (): WoodivoConfiguration => {
       igBusinessAccountId: process.env.META_IG_BUSINESS_ACCOUNT_ID || undefined,
       requestTimeoutMs: parseInt(process.env.META_REQUEST_TIMEOUT_MS ?? '30000', 10),
     },
-    publicMedia: {
-      baseUrl: (process.env.PUBLIC_MEDIA_BASE_URL ?? '').replace(/\/$/, ''),
-      dir: process.env.PUBLIC_MEDIA_DIR ?? './public-media',
+    cloudinary: {
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
+      apiKey: process.env.CLOUDINARY_API_KEY ?? '',
+      apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
     },
     groq: {
       apiBaseUrl: process.env.GROQ_API_BASE_URL ?? 'https://api.groq.com/openai/v1',

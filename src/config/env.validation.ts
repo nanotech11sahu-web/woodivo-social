@@ -5,8 +5,6 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
   APP_NAME: Joi.string().default('woodivo-social-publisher'),
 
-  SOCIAL_POSTS_ROOT_DIR: Joi.string().required(),
-
   SCHEDULER_CRON_EXPRESSION: Joi.string().default('*/30 * * * * *'),
   SCHEDULER_ENABLED: Joi.boolean().default(true),
   SCHEDULER_TIMEZONE: Joi.string().default('UTC'),
@@ -31,10 +29,12 @@ export const envValidationSchema = Joi.object({
   META_IG_BUSINESS_ACCOUNT_ID: Joi.string().allow('').optional(),
   META_REQUEST_TIMEOUT_MS: Joi.number().default(30000),
 
-  // Instagram's Graph API requires a publicly reachable URL for media containers.
-  // This service temporarily exposes processed media at this base URL during publishing.
-  PUBLIC_MEDIA_BASE_URL: Joi.string().uri().required(),
-  PUBLIC_MEDIA_DIR: Joi.string().default('./public-media'),
+  // Media (original + processed) is stored in Cloudinary rather than local
+  // disk, so job state survives restarts/redeploys between submission and
+  // the scheduled processing slot - see CloudinaryService.
+  CLOUDINARY_CLOUD_NAME: Joi.string().required(),
+  CLOUDINARY_API_KEY: Joi.string().required(),
+  CLOUDINARY_API_SECRET: Joi.string().required(),
 
   GROQ_API_BASE_URL: Joi.string().uri().default('https://api.groq.com/openai/v1'),
   GROQ_API_KEY: Joi.string().allow('').optional(),

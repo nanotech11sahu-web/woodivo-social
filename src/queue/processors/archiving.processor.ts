@@ -1,21 +1,21 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
-import { ArchiveService } from '../../archive/archive.service';
 import { JOB_NAMES, QUEUE_NAMES } from '../../shared/constants/queue.constants';
 import { ArchivingJobPayload } from '../../shared/interfaces/job-payloads.interface';
 import { PublishJobRepository } from '../publish-job.repository';
 
 /**
- * Final stage: moves the post folder out of `processing/` into `completed/`
- * or `failed/`. Job status/timestamps for the FAILED path are already set by
- * RetryProcessor before this runs - here we only need to persist the final
- * on-disk location.
+ * Final stage: finalizes the job's status in MongoDB. No filesystem work at
+ * all - there's no folder to move, since media lives in Cloudinary and job
+ * state lives in the database from the moment the post was submitted.
+ * FAILED status/timestamps are already set by RetryProcessor before this
+ * runs; the archive-failed job here just marks the pipeline's bookkeeping
+ * as finished.
  */
 @Processor(QUEUE_NAMES.ARCHIVING)
 export class ArchivingProcessor extends WorkerHost {
   constructor(
-    private readonly archiveService: ArchiveService,
     private readonly jobRepository: PublishJobRepository,
     private readonly logger: PinoLogger,
   ) {
@@ -24,17 +24,14 @@ export class ArchivingProcessor extends WorkerHost {
   }
 
   async process(job: Job<ArchivingJobPayload>): Promise<void> {
-    const { jobId, folderName, folderPath } = job.data;
+    const { jobId } = job.data;
 
     if (job.name === JOB_NAMES.ARCHIVE_COMPLETED) {
-      const finalPath = await this.archiveService.archiveCompleted(folderPath, folderName);
-      await this.jobRepository.markCompleted(jobId, finalPath);
-      this.logger.info({ jobId, finalPath }, 'Post archived to completed/');
+      await this.jobRepository.markCompleted(jobId);
+      this.logger.info({ jobId }, 'Post marked completed');
       return;
     }
 
-    const finalPath = await this.archiveService.archiveFailed(folderPath, folderName);
-    await this.jobRepository.updateFolderPath(jobId, finalPath);
-    this.logger.info({ jobId, finalPath }, 'Post archived to failed/');
+    this.logger.info({ jobId }, 'Post archiving finalized as failed');
   }
 }

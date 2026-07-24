@@ -4,7 +4,6 @@ import { LogLevel, SocialPlatform } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
 import { FacebookService } from '../../facebook/facebook.service';
 import { InstagramService } from '../../instagram/instagram.service';
-import { PublicMediaService } from '../../media/public-media.service';
 import { QUEUE_NAMES } from '../../shared/constants/queue.constants';
 import { PublishingJobPayload } from '../../shared/interfaces/job-payloads.interface';
 import { MediaType } from '../../shared/interfaces/media-type.enum';
@@ -15,8 +14,9 @@ import { PipelineFailureRecorder } from '../pipeline-failure-recorder.service';
 import { ArchivingProducer } from '../producers/archiving.producer';
 
 /**
- * Stage 3: publishes the processed media + AI-generated captions to every
- * platform requested in seo.txt, then posts the first comment on each.
+ * Stage 3: publishes the processed media (already a public Cloudinary URL -
+ * no local file access needed) + AI-generated captions to every platform
+ * requested in seo.txt, then posts the first comment on each.
  *
  * Main-post publishing and comment-posting are tracked and retried
  * independently: PublishingHistory marks a platform's main post as done,
@@ -31,7 +31,6 @@ export class PublishingProcessor extends WorkerHost {
   constructor(
     private readonly facebookService: FacebookService,
     private readonly instagramService: InstagramService,
-    private readonly publicMediaService: PublicMediaService,
     private readonly jobRepository: PublishJobRepository,
     private readonly archivingProducer: ArchivingProducer,
     private readonly failureRecorder: PipelineFailureRecorder,
@@ -42,7 +41,7 @@ export class PublishingProcessor extends WorkerHost {
   }
 
   async process(job: Job<PublishingJobPayload>): Promise<void> {
-    const { jobId, folderName, folderPath, mediaType, processedMediaPath } = job.data;
+    const { jobId, reference, mediaType, processedMediaUrl } = job.data;
 
     const record = await this.jobRepository.findById(jobId);
     if (!record?.generatedContent || !record.seoParsed) {
@@ -57,53 +56,46 @@ export class PublishingProcessor extends WorkerHost {
 
     const externalIds = new Map<SocialPlatform, string>();
 
-    try {
-      if (requestedPlatforms.has('facebook')) {
-        if (!alreadyPublished.has(SocialPlatform.FACEBOOK)) {
-          const externalId = await this.publishMainToFacebook(
-            jobId,
-            processedMediaPath,
-            mediaType,
-            content,
-          );
-          externalIds.set(SocialPlatform.FACEBOOK, externalId);
-        } else {
-          const existingId = await this.jobRepository.getExternalId(jobId, SocialPlatform.FACEBOOK);
-          if (existingId) externalIds.set(SocialPlatform.FACEBOOK, existingId);
-        }
+    if (requestedPlatforms.has('facebook')) {
+      if (!alreadyPublished.has(SocialPlatform.FACEBOOK)) {
+        const externalId = await this.publishMainToFacebook(
+          jobId,
+          processedMediaUrl,
+          mediaType,
+          content,
+        );
+        externalIds.set(SocialPlatform.FACEBOOK, externalId);
+      } else {
+        const existingId = await this.jobRepository.getExternalId(jobId, SocialPlatform.FACEBOOK);
+        if (existingId) externalIds.set(SocialPlatform.FACEBOOK, existingId);
+      }
+    }
+
+    if (requestedPlatforms.has('instagram')) {
+      if (!alreadyPublished.has(SocialPlatform.INSTAGRAM)) {
+        const externalId = await this.publishMainToInstagram(
+          jobId,
+          processedMediaUrl,
+          mediaType,
+          content,
+        );
+        externalIds.set(SocialPlatform.INSTAGRAM, externalId);
+      } else {
+        const existingId = await this.jobRepository.getExternalId(jobId, SocialPlatform.INSTAGRAM);
+        if (existingId) externalIds.set(SocialPlatform.INSTAGRAM, existingId);
+      }
+    }
+
+    if (content.firstComment) {
+      const facebookId = externalIds.get(SocialPlatform.FACEBOOK);
+      if (facebookId && !alreadyCommented.has(SocialPlatform.FACEBOOK)) {
+        await this.commentOnFacebook(jobId, facebookId, content.firstComment);
       }
 
-      if (requestedPlatforms.has('instagram')) {
-        if (!alreadyPublished.has(SocialPlatform.INSTAGRAM)) {
-          const externalId = await this.publishMainToInstagram(
-            jobId,
-            processedMediaPath,
-            mediaType,
-            content,
-          );
-          externalIds.set(SocialPlatform.INSTAGRAM, externalId);
-        } else {
-          const existingId = await this.jobRepository.getExternalId(
-            jobId,
-            SocialPlatform.INSTAGRAM,
-          );
-          if (existingId) externalIds.set(SocialPlatform.INSTAGRAM, existingId);
-        }
+      const instagramId = externalIds.get(SocialPlatform.INSTAGRAM);
+      if (instagramId && !alreadyCommented.has(SocialPlatform.INSTAGRAM)) {
+        await this.commentOnInstagram(jobId, instagramId, content.firstComment);
       }
-
-      if (content.firstComment) {
-        const facebookId = externalIds.get(SocialPlatform.FACEBOOK);
-        if (facebookId && !alreadyCommented.has(SocialPlatform.FACEBOOK)) {
-          await this.commentOnFacebook(jobId, facebookId, content.firstComment);
-        }
-
-        const instagramId = externalIds.get(SocialPlatform.INSTAGRAM);
-        if (instagramId && !alreadyCommented.has(SocialPlatform.INSTAGRAM)) {
-          await this.commentOnInstagram(jobId, instagramId, content.firstComment);
-        }
-      }
-    } finally {
-      await this.publicMediaService.cleanup(jobId);
     }
 
     await this.jobRepository.addLog(
@@ -111,26 +103,22 @@ export class PublishingProcessor extends WorkerHost {
       LogLevel.INFO,
       'Post published to all requested platforms',
     );
-    await this.archivingProducer.enqueueSuccess({ jobId, folderName, folderPath });
+    await this.archivingProducer.enqueueSuccess({ jobId, reference });
   }
 
   private async publishMainToFacebook(
     jobId: string,
-    processedMediaPath: string,
+    mediaUrl: string,
     mediaType: MediaType,
     content: SocialContentResponseDto,
   ): Promise<string> {
-    const result = await this.facebookService.publish(
-      processedMediaPath,
-      mediaType,
-      content.facebookCaption,
-    );
+    const result = await this.facebookService.publish(mediaUrl, mediaType, content.facebookCaption);
 
     await this.jobRepository.addMetaResponse({
       jobId,
       platform: SocialPlatform.FACEBOOK,
       endpoint: mediaType === MediaType.IMAGE ? '/photos' : '/videos',
-      requestPayload: { caption: content.facebookCaption },
+      requestPayload: { caption: content.facebookCaption, mediaUrl },
       responsePayload: result.rawResponse,
       success: true,
       externalId: result.externalId,
@@ -149,14 +137,12 @@ export class PublishingProcessor extends WorkerHost {
 
   private async publishMainToInstagram(
     jobId: string,
-    processedMediaPath: string,
+    mediaUrl: string,
     mediaType: MediaType,
     content: SocialContentResponseDto,
   ): Promise<string> {
-    const publicUrl = await this.publicMediaService.expose(jobId, processedMediaPath);
-
     const result = await this.instagramService.publish(
-      publicUrl,
+      mediaUrl,
       mediaType,
       content.instagramCaption,
       content.altText,
@@ -166,7 +152,7 @@ export class PublishingProcessor extends WorkerHost {
       jobId,
       platform: SocialPlatform.INSTAGRAM,
       endpoint: '/media',
-      requestPayload: { caption: content.instagramCaption, mediaUrl: publicUrl },
+      requestPayload: { caption: content.instagramCaption, mediaUrl },
       responsePayload: result.rawResponse,
       success: true,
       externalId: result.externalId,

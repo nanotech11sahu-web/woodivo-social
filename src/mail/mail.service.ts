@@ -5,7 +5,7 @@ import { AppConfigService } from '../config/app-config.service';
 
 export interface FailureNotification {
   jobId: string;
-  folderName: string;
+  reference: string;
   stage: string;
   reason: string;
   attempts: number;
@@ -51,12 +51,12 @@ export class MailService {
       return;
     }
 
-    const subject = `[Woodivo Social Publisher] Post failed: ${notification.folderName}`;
+    const subject = `[Woodivo Social Publisher] Post failed: ${notification.reference}`;
     const text = [
       `A post failed to publish and requires manual attention.`,
       ``,
       `Job ID: ${notification.jobId}`,
-      `Folder: ${notification.folderName}`,
+      `Reference: ${notification.reference}`,
       `Failed stage: ${notification.stage}`,
       `Attempts: ${notification.attempts}`,
       `Occurred at: ${notification.occurredAt.toISOString()}`,
@@ -64,7 +64,7 @@ export class MailService {
       `Reason:`,
       notification.reason,
       ``,
-      `The post has been moved to the "failed" folder for review.`,
+      `Check the Social Posts status table (or GET /posts/${notification.jobId}) for full details.`,
     ].join('\n');
 
     try {

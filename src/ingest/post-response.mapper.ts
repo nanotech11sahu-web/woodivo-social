@@ -9,7 +9,7 @@ interface PlatformResult {
 
 export interface PostSummaryResponse {
   id: string;
-  folderName: string;
+  reference: string;
   sourceType: string;
   sourceId: string | null;
   sourceTitle: string | null;
@@ -50,7 +50,7 @@ export function toPostSummary(
 ): PostSummaryResponse {
   return {
     id: job.id,
-    folderName: job.folderName,
+    reference: job.reference,
     sourceType: job.sourceType,
     sourceId: job.sourceId ?? null,
     sourceTitle: job.sourceTitle ?? null,
