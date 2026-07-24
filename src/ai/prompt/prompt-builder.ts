@@ -50,8 +50,11 @@ RULES
 - Respect the requested tone and language strictly.
 - Never fabricate claims not implied by the business brief (no fake awards, prices, or guarantees).
 - Keep captions free of placeholder text such as "[insert here]".
-- If Website is not "N/A", both facebookCaption and instagramCaption MUST include the literal
-  website text written out naturally (e.g. "Visit ${seo.website ?? 'the website'}" or
-  "Shop now at ${seo.website ?? 'the website'}") - never just "link in bio" with no actual URL text.`;
+- If Website is not "N/A", facebookCaption MUST include the literal website text written out
+  naturally (e.g. "Visit ${seo.website ?? 'the website'}" or "Shop now at ${seo.website ?? 'the website'}")
+  - never just "link in bio" with no actual URL text, since Facebook readers cannot tap a bio link.
+- instagramCaption must NEVER include the literal website URL as text, since Instagram never makes
+  caption links clickable. Instead, naturally reference checking the link in bio (e.g. "Tap the link
+  in bio to shop now!") without writing out the URL itself.`;
   }
 }

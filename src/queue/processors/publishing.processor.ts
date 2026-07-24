@@ -51,12 +51,12 @@ export class PublishingProcessor extends WorkerHost {
     const content = record.generatedContent as unknown as SocialContentResponseDto;
     const seo = record.seoParsed as unknown as SeoData;
     const requestedPlatforms = new Set(seo.platforms.map((p) => p.toLowerCase()));
-    const facebookCaption = this.finalizeCaption(
+    const facebookCaption = this.finalizeFacebookCaption(
       content.facebookCaption,
       content.hashtags,
       seo.website,
     );
-    const instagramCaption = this.finalizeCaption(
+    const instagramCaption = this.finalizeInstagramCaption(
       content.instagramCaption,
       content.hashtags,
       seo.website,
@@ -177,17 +177,39 @@ export class PublishingProcessor extends WorkerHost {
   }
 
   /**
-   * The prompt deliberately keeps hashtags out of the AI-written caption
-   * (so the prose reads cleanly) and doesn't force a literal website
-   * mention - both are guaranteed here instead of just hoped for, since a
-   * missing hashtag block or missing link is a real, visible defect on a
-   * live public post, not a cosmetic one.
+   * Facebook sometimes auto-linkifies a plain URL in a Page post, so the
+   * literal website is worth guaranteeing here rather than just hoped for.
    */
-  private finalizeCaption(caption: string, hashtags: string[], website?: string): string {
+  private finalizeFacebookCaption(caption: string, hashtags: string[], website?: string): string {
     let result = caption.trim();
 
     if (website && !result.toLowerCase().includes(website.toLowerCase())) {
       result += `\n\nVisit ${website}`;
+    }
+
+    if (hashtags.length > 0) {
+      result += `\n\n${hashtags.join(' ')}`;
+    }
+
+    return result;
+  }
+
+  /**
+   * Instagram never makes a caption URL clickable, so a raw link there is
+   * dead text - strip it if the AI included one anyway and use the
+   * platform-standard "link in bio" convention instead.
+   */
+  private finalizeInstagramCaption(caption: string, hashtags: string[], website?: string): string {
+    let result = caption.trim();
+
+    if (website) {
+      const escaped = website.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`https?:\\/\\/${escaped}\\S*|${escaped}\\S*`, 'gi'), '').trim();
+      result = result.replace(/\n{3,}/g, '\n\n').trim();
+
+      if (!/link in bio/i.test(result)) {
+        result += `\n\n🔗 Link in bio to shop now!`;
+      }
     }
 
     if (hashtags.length > 0) {
