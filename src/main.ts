@@ -5,7 +5,10 @@ import { AppModule } from './app.module';
 import { AppConfigService } from './config/app-config.service';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: true so the webhook controller can verify Meta's
+  // X-Hub-Signature-256 header against the exact bytes Meta sent, before any
+  // JSON parsing/transformation happens.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   app.useLogger(app.get(Logger));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

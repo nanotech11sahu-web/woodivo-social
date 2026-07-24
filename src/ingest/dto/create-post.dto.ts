@@ -35,4 +35,13 @@ export class CreatePostDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   urgent?: boolean;
+
+  /**
+   * "Post as Reel" - CMS Custom Posts only. Requires a single video file;
+   * rejected if the submission is an image or a multi-item carousel.
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  isReel?: boolean;
 }

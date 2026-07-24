@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AiModule } from './ai/ai.module';
+import { AutoReplyModule } from './auto-reply/auto-reply.module';
 import { ConfigModule } from './config/config.module';
 import { FacebookModule } from './facebook/facebook.module';
 import { HealthModule } from './health/health.module';
@@ -12,6 +13,7 @@ import { ParserModule } from './parser/parser.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
+import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { SchedulerModule } from './scheduler/scheduler.module';
     SchedulerModule,
     HealthModule,
     IngestModule,
+    AutoReplyModule,
+    WebhookModule,
   ],
 })
 export class AppModule {}

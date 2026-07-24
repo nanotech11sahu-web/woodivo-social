@@ -93,6 +93,12 @@ export class IngestController {
 
     const mediaType = mediaTypes[0];
 
+    if (dto.isReel && (mediaType !== MediaType.VIDEO || files.length > 1)) {
+      throw new BadRequestException(
+        '"isReel" requires exactly one video file - Reels cannot be images or carousels',
+      );
+    }
+
     const uploads = await Promise.all(
       files.map((file) =>
         this.cloudinaryService.uploadBuffer(
@@ -114,6 +120,7 @@ export class IngestController {
       sourceId: dto.sourceId,
       sourceTitle: dto.sourceTitle,
       urgent: dto.urgent ?? false,
+      isReel: dto.isReel ?? false,
     });
 
     this.logger.info(
