@@ -15,6 +15,10 @@ interface FacebookVideoResponse {
   id: string;
 }
 
+interface FacebookFeedResponse {
+  id: string;
+}
+
 /**
  * Publishes content to a Facebook Page via the Meta Graph API. This is the
  * only class aware of Facebook-specific endpoint shapes. Publishes from a
@@ -32,7 +36,7 @@ export class FacebookService {
   }
 
   async publish(
-    mediaUrl: string,
+    mediaUrls: string[],
     mediaType: MediaType,
     caption: string,
   ): Promise<SocialPublishResult> {
@@ -43,6 +47,12 @@ export class FacebookService {
         false,
       );
     }
+
+    if (mediaType === MediaType.IMAGE && mediaUrls.length > 1) {
+      return this.publishCarousel(pageId, pageAccessToken, mediaUrls, caption);
+    }
+
+    const mediaUrl = mediaUrls[0];
 
     if (mediaType === MediaType.IMAGE) {
       const result = await this.graphClient.post<FacebookPhotoResponse>(`/${pageId}/photos`, {
@@ -67,6 +77,53 @@ export class FacebookService {
       access_token: pageAccessToken,
     });
     this.logger.info({ externalId: result.data.id }, 'Published video to Facebook Page');
+    return {
+      externalId: result.data.id,
+      permalink: `https://www.facebook.com/${result.data.id}`,
+      rawResponse: result.data as unknown as Record<string, unknown>,
+    };
+  }
+
+  /**
+   * Facebook Page carousels aren't a single "carousel" endpoint like
+   * Instagram's - each photo is uploaded unpublished to collect an id, then
+   * one /feed post attaches all of them together via attached_media.
+   */
+  private async publishCarousel(
+    pageId: string,
+    pageAccessToken: string,
+    mediaUrls: string[],
+    caption: string,
+  ): Promise<SocialPublishResult> {
+    const unpublishedPhotoIds = await Promise.all(
+      mediaUrls.map(async (url) => {
+        const result = await this.graphClient.post<FacebookPhotoResponse>(`/${pageId}/photos`, {
+          url,
+          published: false,
+          access_token: pageAccessToken,
+        });
+        return result.data.id;
+      }),
+    );
+
+    const attachedMediaParams = Object.fromEntries(
+      unpublishedPhotoIds.map((id, index) => [
+        `attached_media[${index}]`,
+        JSON.stringify({ media_fbid: id }),
+      ]),
+    );
+
+    const result = await this.graphClient.post<FacebookFeedResponse>(`/${pageId}/feed`, {
+      message: caption,
+      access_token: pageAccessToken,
+      ...attachedMediaParams,
+    });
+
+    this.logger.info(
+      { externalId: result.data.id, itemCount: mediaUrls.length },
+      'Published multi-photo carousel to Facebook Page',
+    );
+
     return {
       externalId: result.data.id,
       permalink: `https://www.facebook.com/${result.data.id}`,

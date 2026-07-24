@@ -13,7 +13,7 @@ export class CreatePostDto {
 
   /** What kind of content this came from - defaults to OTHER if omitted. */
   @IsOptional()
-  @IsIn(['PRODUCT', 'BLOG', 'OTHER'])
+  @IsIn(['PRODUCT', 'BLOG', 'CUSTOM', 'OTHER'])
   sourceType?: PostSourceType;
 
   /** Originating id in the caller's own system (e.g. a Woodivo product/blog id). */

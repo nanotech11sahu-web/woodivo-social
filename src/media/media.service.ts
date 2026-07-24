@@ -13,9 +13,9 @@ export type ProcessedMedia =
 
 /**
  * Public entry point for media handling. Delegates to Sharp (images) or
- * FFmpeg (video) based on mediaType. Also exposes processMany() for future
- * carousel posts - each item is processed independently so a carousel is
- * simply an ordered list of single-item results.
+ * FFmpeg (video) based on mediaType. processMany() drives carousel posts -
+ * each item (including its watermark) is processed independently so a
+ * carousel is simply an ordered list of single-item results.
  */
 @Injectable()
 export class MediaService {

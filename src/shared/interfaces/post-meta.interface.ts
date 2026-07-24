@@ -1,1 +1,1 @@
-export type PostSourceType = 'PRODUCT' | 'BLOG' | 'OTHER';
+export type PostSourceType = 'PRODUCT' | 'BLOG' | 'CUSTOM' | 'OTHER';

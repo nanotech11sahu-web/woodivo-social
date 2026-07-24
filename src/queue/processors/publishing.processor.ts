@@ -41,7 +41,7 @@ export class PublishingProcessor extends WorkerHost {
   }
 
   async process(job: Job<PublishingJobPayload>): Promise<void> {
-    const { jobId, reference, mediaType, processedMediaUrl } = job.data;
+    const { jobId, reference, mediaType, processedMediaUrls } = job.data;
 
     const record = await this.jobRepository.findById(jobId);
     if (!record?.generatedContent || !record.seoParsed) {
@@ -70,7 +70,7 @@ export class PublishingProcessor extends WorkerHost {
       if (!alreadyPublished.has(SocialPlatform.FACEBOOK)) {
         const externalId = await this.publishMainToFacebook(
           jobId,
-          processedMediaUrl,
+          processedMediaUrls,
           mediaType,
           facebookCaption,
         );
@@ -85,7 +85,7 @@ export class PublishingProcessor extends WorkerHost {
       if (!alreadyPublished.has(SocialPlatform.INSTAGRAM)) {
         const externalId = await this.publishMainToInstagram(
           jobId,
-          processedMediaUrl,
+          processedMediaUrls,
           mediaType,
           instagramCaption,
           content.altText,
@@ -119,17 +119,23 @@ export class PublishingProcessor extends WorkerHost {
 
   private async publishMainToFacebook(
     jobId: string,
-    mediaUrl: string,
+    mediaUrls: string[],
     mediaType: MediaType,
     caption: string,
   ): Promise<string> {
-    const result = await this.facebookService.publish(mediaUrl, mediaType, caption);
+    const result = await this.facebookService.publish(mediaUrls, mediaType, caption);
+    const endpoint =
+      mediaType === MediaType.IMAGE
+        ? mediaUrls.length > 1
+          ? '/feed'
+          : '/photos'
+        : '/videos';
 
     await this.jobRepository.addMetaResponse({
       jobId,
       platform: SocialPlatform.FACEBOOK,
-      endpoint: mediaType === MediaType.IMAGE ? '/photos' : '/videos',
-      requestPayload: { caption, mediaUrl },
+      endpoint,
+      requestPayload: { caption, mediaUrls },
       responsePayload: result.rawResponse,
       success: true,
       externalId: result.externalId,
@@ -148,18 +154,18 @@ export class PublishingProcessor extends WorkerHost {
 
   private async publishMainToInstagram(
     jobId: string,
-    mediaUrl: string,
+    mediaUrls: string[],
     mediaType: MediaType,
     caption: string,
     altText: string,
   ): Promise<string> {
-    const result = await this.instagramService.publish(mediaUrl, mediaType, caption, altText);
+    const result = await this.instagramService.publish(mediaUrls, mediaType, caption, altText);
 
     await this.jobRepository.addMetaResponse({
       jobId,
       platform: SocialPlatform.INSTAGRAM,
-      endpoint: '/media',
-      requestPayload: { caption, mediaUrl },
+      endpoint: mediaUrls.length > 1 ? '/media (carousel)' : '/media',
+      requestPayload: { caption, mediaUrls },
       responsePayload: result.rawResponse,
       success: true,
       externalId: result.externalId,

@@ -9,11 +9,11 @@ import {
   Param,
   Post,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
@@ -28,6 +28,10 @@ import { ApiKeyGuard } from './guards/api-key.guard';
 import { toPostSummary, toPostDetail } from './post-response.mapper';
 
 const SUPPORTED_EXTENSIONS = [...MEDIA_EXTENSIONS.IMAGE, ...MEDIA_EXTENSIONS.VIDEO];
+// Meta's carousel formats (Facebook attached_media, Instagram CAROUSEL) both
+// cap out at 10 items - reject bulkier submissions up front instead of
+// letting the publishing stage discover the limit later.
+const MAX_MEDIA_ITEMS = 10;
 
 /**
  * HTTP hand-off for post creation. Exists so Woodivo's backend can submit a
@@ -53,29 +57,49 @@ export class IngestController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ApiKeyGuard)
-  @UseInterceptors(FileInterceptor('media'))
+  @UseInterceptors(FilesInterceptor('media', MAX_MEDIA_ITEMS))
   async create(
     @Body() dto: CreatePostDto,
-    @UploadedFile() file?: Express.Multer.File,
+    @UploadedFiles() files?: Express.Multer.File[],
   ): Promise<{ reference: string; jobId: string; status: string }> {
-    if (!file) {
-      throw new BadRequestException('Multipart field "media" (image or video file) is required');
-    }
-
-    const extension = path.extname(file.originalname).toLowerCase();
-    if (!SUPPORTED_EXTENSIONS.includes(extension as (typeof SUPPORTED_EXTENSIONS)[number])) {
+    if (!files || files.length === 0) {
       throw new BadRequestException(
-        `Unsupported media file extension "${extension}". Supported: ${SUPPORTED_EXTENSIONS.join(', ')}`,
+        'At least one multipart "media" field (image or video file) is required',
       );
     }
 
-    const mediaType = (MEDIA_EXTENSIONS.IMAGE as readonly string[]).includes(extension)
-      ? MediaType.IMAGE
-      : MediaType.VIDEO;
+    for (const file of files) {
+      const extension = path.extname(file.originalname).toLowerCase();
+      if (!SUPPORTED_EXTENSIONS.includes(extension as (typeof SUPPORTED_EXTENSIONS)[number])) {
+        throw new BadRequestException(
+          `Unsupported media file extension "${extension}". Supported: ${SUPPORTED_EXTENSIONS.join(', ')}`,
+        );
+      }
+    }
 
-    const upload = await this.cloudinaryService.uploadBuffer(
-      file.buffer,
-      mediaType === MediaType.IMAGE ? 'image' : 'video',
+    const mediaTypes = files.map((file) =>
+      (MEDIA_EXTENSIONS.IMAGE as readonly string[]).includes(
+        path.extname(file.originalname).toLowerCase(),
+      )
+        ? MediaType.IMAGE
+        : MediaType.VIDEO,
+    );
+
+    if (files.length > 1 && mediaTypes.some((type) => type !== MediaType.IMAGE)) {
+      throw new BadRequestException(
+        'Multi-item posts (carousels) only support images - submit video as a single "media" file',
+      );
+    }
+
+    const mediaType = mediaTypes[0];
+
+    const uploads = await Promise.all(
+      files.map((file) =>
+        this.cloudinaryService.uploadBuffer(
+          file.buffer,
+          mediaType === MediaType.IMAGE ? 'image' : 'video',
+        ),
+      ),
     );
 
     const reference = `post-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -84,8 +108,8 @@ export class IngestController {
       reference,
       seoRawText: dto.seo,
       mediaType,
-      mediaUrl: upload.secureUrl,
-      mediaPublicId: upload.publicId,
+      mediaUrls: uploads.map((upload) => upload.secureUrl),
+      mediaPublicIds: uploads.map((upload) => upload.publicId),
       sourceType: dto.sourceType ?? 'OTHER',
       sourceId: dto.sourceId,
       sourceTitle: dto.sourceTitle,

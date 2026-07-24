@@ -11,13 +11,14 @@ const CRON_JOB_NAME = 'woodivo-social-publisher-pending-scan';
 const SOURCE_TYPES: readonly PostSourceType[] = [
   PostSourceType.PRODUCT,
   PostSourceType.BLOG,
+  PostSourceType.CUSTOM,
   PostSourceType.OTHER,
 ];
 
 /**
  * Picks up PENDING jobs from MongoDB on a configurable cron schedule. Each
- * tick picks at most ONE job per content type (PRODUCT, BLOG, OTHER) - so a
- * large batch of bulk-submitted products can never starve blog posts (or
+ * tick picks at most ONE job per content type (PRODUCT, BLOG, CUSTOM, OTHER) -
+ * so a large batch of bulk-submitted products can never starve blog posts (or
  * vice versa) out of a run; each type gets its own turn. Every job is
  * processed independently and wrapped in its own try/catch, so one bad post
  * can never stop the rest of the tick or future ticks.

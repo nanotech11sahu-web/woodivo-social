@@ -52,9 +52,12 @@ enum LogLevel {
 // give each content type its own turn per run (see SchedulerService) instead
 // of one type's backlog starving another's. OTHER covers posts submitted
 // without this context (e.g. dropped directly into pending/ for local testing).
+// CUSTOM covers posts built directly in Woodivo's CMS that aren't tied to any
+// Product/Blog record at all.
 enum PostSourceType {
   PRODUCT
   BLOG
+  CUSTOM
   OTHER
 }
 
@@ -69,10 +72,13 @@ model PublishJob {
   seoRawText String
   seoParsed  Json?
   mediaType         String?
-  mediaUrl          String?
-  mediaPublicId     String?
-  processedMediaUrl String?
-  processedMediaPublicId String?
+  // One or more Cloudinary URLs/publicIds - a single item is an ordinary post,
+  // more than one is published as a Facebook/Instagram carousel (see
+  // FacebookService/InstagramService). Order is preserved end-to-end.
+  mediaUrls               String[]
+  mediaPublicIds          String[]
+  processedMediaUrls      String[]
+  processedMediaPublicIds String[]
   generatedContent  Json?
   failureReason     String?
   failedStage       PublishStage?

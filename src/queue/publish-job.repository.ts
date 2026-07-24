@@ -16,8 +16,8 @@ export interface CreatePendingJobParams {
   reference: string;
   seoRawText: string;
   mediaType: 'IMAGE' | 'VIDEO';
-  mediaUrl: string;
-  mediaPublicId: string;
+  mediaUrls: string[];
+  mediaPublicIds: string[];
   sourceType: PostSourceType;
   sourceId?: string;
   sourceTitle?: string;
@@ -45,8 +45,8 @@ export class PublishJobRepository {
         reference: params.reference,
         seoRawText: params.seoRawText,
         mediaType: params.mediaType,
-        mediaUrl: params.mediaUrl,
-        mediaPublicId: params.mediaPublicId,
+        mediaUrls: params.mediaUrls,
+        mediaPublicIds: params.mediaPublicIds,
         status: PublishJobStatus.PENDING,
         sourceType: params.sourceType as PrismaPostSourceType,
         sourceId: params.sourceId,
@@ -122,12 +122,16 @@ export class PublishJobRepository {
 
   setProcessedMedia(
     jobId: string,
-    processedMediaUrl: string,
-    processedMediaPublicId: string,
+    processedMediaUrls: string[],
+    processedMediaPublicIds: string[],
   ): Promise<PublishJob> {
     return this.prisma.publishJob.update({
       where: { id: jobId },
-      data: { processedMediaUrl, processedMediaPublicId, status: PublishJobStatus.PUBLISHING },
+      data: {
+        processedMediaUrls,
+        processedMediaPublicIds,
+        status: PublishJobStatus.PUBLISHING,
+      },
     });
   }
 
