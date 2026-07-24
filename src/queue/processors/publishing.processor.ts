@@ -73,6 +73,7 @@ export class PublishingProcessor extends WorkerHost {
           processedMediaUrls,
           mediaType,
           facebookCaption,
+          record.isReel,
         );
         externalIds.set(SocialPlatform.FACEBOOK, externalId);
       } else {
@@ -122,10 +123,15 @@ export class PublishingProcessor extends WorkerHost {
     mediaUrls: string[],
     mediaType: MediaType,
     caption: string,
+    isReel: boolean,
   ): Promise<string> {
-    const result = await this.facebookService.publish(mediaUrls, mediaType, caption);
-    const endpoint =
-      mediaType === MediaType.IMAGE
+    const useReelFlow = isReel && mediaType === MediaType.VIDEO;
+    const result = useReelFlow
+      ? await this.facebookService.publishReel(mediaUrls[0], caption)
+      : await this.facebookService.publish(mediaUrls, mediaType, caption);
+    const endpoint = useReelFlow
+      ? '/video_reels'
+      : mediaType === MediaType.IMAGE
         ? mediaUrls.length > 1
           ? '/feed'
           : '/photos'

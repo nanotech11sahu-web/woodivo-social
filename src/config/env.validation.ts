@@ -28,6 +28,10 @@ export const envValidationSchema = Joi.object({
   META_PAGE_ACCESS_TOKEN: Joi.string().allow('').optional(),
   META_IG_BUSINESS_ACCOUNT_ID: Joi.string().allow('').optional(),
   META_REQUEST_TIMEOUT_MS: Joi.number().default(30000),
+  // Chosen by us, pasted into the Meta App Dashboard's webhook setup screen -
+  // Meta echoes it back on the GET verification handshake so we can confirm
+  // the subscription request actually came from Meta's dashboard.
+  META_WEBHOOK_VERIFY_TOKEN: Joi.string().allow('').optional(),
 
   // Media (original + processed) is stored in Cloudinary rather than local
   // disk, so job state survives restarts/redeploys between submission and

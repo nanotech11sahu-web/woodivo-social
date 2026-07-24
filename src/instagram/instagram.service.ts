@@ -182,6 +182,42 @@ export class InstagramService {
     this.logger.info({ mediaId }, 'Posted first comment on Instagram media');
   }
 
+  /**
+   * Replies to an existing comment. Unlike Facebook, Instagram replies use a
+   * dedicated endpoint - POST /{ig-comment-id}/replies - not /comments.
+   */
+  async replyToComment(commentId: string, message: string): Promise<void> {
+    const { pageAccessToken } = this.appConfig.meta;
+    if (!pageAccessToken) {
+      throw new MetaPublishException(
+        'META_PAGE_ACCESS_TOKEN must be configured to reply to a comment',
+        false,
+      );
+    }
+    await this.graphClient.post(`/${commentId}/replies`, { message, access_token: pageAccessToken });
+    this.logger.info({ commentId }, 'Replied to Instagram comment');
+  }
+
+  /**
+   * Sends a private reply via Instagram's unified Messenger Send API -
+   * requires instagram_manage_messages.
+   */
+  async sendDirectMessage(recipientIgsid: string, message: string): Promise<void> {
+    const { igBusinessAccountId, pageAccessToken } = this.appConfig.meta;
+    if (!igBusinessAccountId || !pageAccessToken) {
+      throw new MetaPublishException(
+        'META_IG_BUSINESS_ACCOUNT_ID and META_PAGE_ACCESS_TOKEN must be configured to send a DM',
+        false,
+      );
+    }
+    await this.graphClient.post(`/${igBusinessAccountId}/messages`, {
+      recipient: JSON.stringify({ id: recipientIgsid }),
+      message: JSON.stringify({ text: message }),
+      access_token: pageAccessToken,
+    });
+    this.logger.info({ recipientIgsid }, 'Sent Instagram DM');
+  }
+
   private async waitForContainerReady(containerId: string, accessToken: string): Promise<void> {
     const deadline = Date.now() + CONTAINER_POLL_TIMEOUT_MS;
 

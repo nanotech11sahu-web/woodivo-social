@@ -22,6 +22,7 @@ export interface CreatePendingJobParams {
   sourceId?: string;
   sourceTitle?: string;
   urgent: boolean;
+  isReel?: boolean;
 }
 
 /**
@@ -52,6 +53,7 @@ export class PublishJobRepository {
         sourceId: params.sourceId,
         sourceTitle: params.sourceTitle,
         urgent: params.urgent,
+        isReel: params.isReel ?? false,
       },
     });
   }

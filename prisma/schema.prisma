@@ -61,6 +61,17 @@ enum PostSourceType {
   OTHER
 }
 
+enum AutoReplyTrigger {
+  COMMENT
+  DM
+}
+
+enum AutoReplyPlatform {
+  FACEBOOK
+  INSTAGRAM
+  BOTH
+}
+
 model PublishJob {
   id     String           @id @default(auto()) @map("_id") @db.ObjectId
   // Human-readable label for logs/emails/CMS display - no longer a real
@@ -91,6 +102,11 @@ model PublishJob {
   // "Post Now" - wins the pick for its sourceType bucket over non-urgent
   // PENDING jobs regardless of submission order (see SchedulerService).
   urgent            Boolean        @default(false)
+  // "Post as Reel" - set from the CMS Custom Posts flow only. When true, the
+  // Facebook branch of PublishingProcessor uses the dedicated /video_reels
+  // flow instead of a plain Page video post; Instagram already Reels-ifies
+  // any single video regardless of this flag.
+  isReel            Boolean        @default(false)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   startedAt         DateTime?
@@ -183,4 +199,44 @@ model PublishingHistory {
 
   @@index([jobId])
   @@map("publishing_history")
+}
+
+// Keyword-triggered engagement automation rules, managed from Woodivo's CMS.
+// Evaluated in ascending `priority` order - the first active rule whose
+// keywords match wins (mirrors the scheduler's "one pick per bucket" style).
+model AutoReplyRule {
+  id           String            @id @default(auto()) @map("_id") @db.ObjectId
+  platform     AutoReplyPlatform @default(BOTH)
+  trigger      AutoReplyTrigger
+  keywords     String[]
+  active       Boolean           @default(true)
+  priority     Int               @default(0)
+  // Public reply text - only used when trigger = COMMENT.
+  replyComment String?
+  // DM text - sent when trigger = COMMENT (comment-to-DM funnel) or used to
+  // reply in-thread when trigger = DM.
+  replyDm      String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([trigger, active])
+  @@map("auto_reply_rules")
+}
+
+// Audit trail of every inbound comment/message event received via the Meta
+// webhook, and what (if anything) the auto-reply engine did about it.
+model InboundEventLog {
+  id            String         @id @default(auto()) @map("_id") @db.ObjectId
+  platform      SocialPlatform
+  eventType     String
+  externalId    String
+  senderId      String
+  text          String
+  matchedRuleId String?
+  actionTaken   String?
+  rawPayload    Json
+  createdAt     DateTime       @default(now())
+
+  @@index([platform, eventType])
+  @@map("inbound_event_log")
 }

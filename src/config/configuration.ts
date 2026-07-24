@@ -32,6 +32,7 @@ export interface MetaConfig {
   pageAccessToken?: string;
   igBusinessAccountId?: string;
   requestTimeoutMs: number;
+  webhookVerifyToken?: string;
 }
 
 export interface CloudinaryConfig {
@@ -127,6 +128,7 @@ export default (): WoodivoConfiguration => {
       pageAccessToken: process.env.META_PAGE_ACCESS_TOKEN || undefined,
       igBusinessAccountId: process.env.META_IG_BUSINESS_ACCOUNT_ID || undefined,
       requestTimeoutMs: parseInt(process.env.META_REQUEST_TIMEOUT_MS ?? '30000', 10),
+      webhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || undefined,
     },
     cloudinary: {
       cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
