@@ -37,7 +37,7 @@ export class InstagramService {
   }
 
   async publish(
-    mediaPublicUrl: string,
+    mediaPublicUrls: string[],
     mediaType: MediaType,
     caption: string,
     altText: string,
@@ -49,6 +49,17 @@ export class InstagramService {
         false,
       );
     }
+
+    if (mediaType === MediaType.IMAGE && mediaPublicUrls.length > 1) {
+      return this.publishCarousel(
+        igBusinessAccountId,
+        pageAccessToken,
+        mediaPublicUrls,
+        caption,
+      );
+    }
+
+    const mediaPublicUrl = mediaPublicUrls[0];
 
     const containerParams: Record<string, string | number | boolean> =
       mediaType === MediaType.IMAGE
@@ -85,6 +96,71 @@ export class InstagramService {
     this.logger.info(
       { mediaId: publishResult.data.id },
       'Published media to Instagram Business Account',
+    );
+
+    return {
+      externalId: publishResult.data.id,
+      permalink: permalinkResult.data.permalink,
+      rawResponse: publishResult.data as unknown as Record<string, unknown>,
+    };
+  }
+
+  /**
+   * Instagram carousel flow: each image becomes its own child container
+   * (is_carousel_item: true, no caption), then one parent container of
+   * media_type CAROUSEL references all the children and carries the caption,
+   * then that parent is published exactly like a single-image post.
+   */
+  private async publishCarousel(
+    igBusinessAccountId: string,
+    pageAccessToken: string,
+    mediaPublicUrls: string[],
+    caption: string,
+  ): Promise<SocialPublishResult> {
+    const childIds = await Promise.all(
+      mediaPublicUrls.map(async (url) => {
+        const child = await this.graphClient.post<ContainerResponse>(
+          `/${igBusinessAccountId}/media`,
+          {
+            image_url: url,
+            is_carousel_item: true,
+            access_token: pageAccessToken,
+          },
+        );
+        await this.waitForContainerReady(child.data.id, pageAccessToken);
+        return child.data.id;
+      }),
+    );
+
+    const parentParams: Record<string, string> = {
+      media_type: 'CAROUSEL',
+      caption,
+      access_token: pageAccessToken,
+    };
+    childIds.forEach((id, index) => {
+      parentParams[`children[${index}]`] = id;
+    });
+
+    const parent = await this.graphClient.post<ContainerResponse>(
+      `/${igBusinessAccountId}/media`,
+      parentParams,
+    );
+
+    await this.waitForContainerReady(parent.data.id, pageAccessToken);
+
+    const publishResult = await this.graphClient.post<MediaPublishResponse>(
+      `/${igBusinessAccountId}/media_publish`,
+      { creation_id: parent.data.id, access_token: pageAccessToken },
+    );
+
+    const permalinkResult = await this.graphClient.get<{ permalink?: string }>(
+      `/${publishResult.data.id}`,
+      { fields: 'permalink', access_token: pageAccessToken },
+    );
+
+    this.logger.info(
+      { mediaId: publishResult.data.id, itemCount: mediaPublicUrls.length },
+      'Published carousel to Instagram Business Account',
     );
 
     return {

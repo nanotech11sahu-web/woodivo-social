@@ -10,12 +10,12 @@ export type AiGenerationJobPayload = PostJobPayload;
 
 export interface MediaProcessingJobPayload extends PostJobPayload {
   mediaType: MediaType;
-  mediaUrl: string; // Cloudinary URL
+  mediaUrls: string[]; // Cloudinary URLs - one item is a normal post, multiple is a carousel
 }
 
 export interface PublishingJobPayload extends PostJobPayload {
   mediaType: MediaType;
-  processedMediaUrl: string; // Cloudinary URL
+  processedMediaUrls: string[]; // Cloudinary URLs
 }
 
 export type ArchivingJobPayload = PostJobPayload;

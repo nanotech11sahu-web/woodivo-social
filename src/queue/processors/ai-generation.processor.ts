@@ -39,7 +39,7 @@ export class AiGenerationProcessor extends WorkerHost {
     if (!record) {
       throw new Error(`PublishJob ${jobId} not found`);
     }
-    if (!record.mediaUrl || !record.mediaType) {
+    if (!record.mediaUrls || record.mediaUrls.length === 0 || !record.mediaType) {
       throw new Error(`PublishJob ${jobId} is missing media information`);
     }
 
@@ -66,7 +66,7 @@ export class AiGenerationProcessor extends WorkerHost {
       jobId,
       reference,
       mediaType: record.mediaType as MediaType,
-      mediaUrl: record.mediaUrl,
+      mediaUrls: record.mediaUrls,
     });
   }
 

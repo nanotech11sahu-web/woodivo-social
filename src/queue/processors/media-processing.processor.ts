@@ -33,31 +33,42 @@ export class MediaProcessingProcessor extends WorkerHost {
   }
 
   async process(job: Job<MediaProcessingJobPayload>): Promise<void> {
-    const { jobId, reference, mediaType, mediaUrl } = job.data;
+    const { jobId, reference, mediaType, mediaUrls } = job.data;
 
-    const originalBuffer = await this.cloudinaryService.downloadToBuffer(mediaUrl);
-    const result = await this.mediaService.processSingle(originalBuffer, mediaType);
+    const originalBuffers = await Promise.all(
+      mediaUrls.map((url) => this.cloudinaryService.downloadToBuffer(url)),
+    );
+    const results = await this.mediaService.processMany(
+      originalBuffers.map((buffer) => ({ buffer, mediaType })),
+    );
 
-    const upload =
-      result.mediaType === MediaType.IMAGE
-        ? await this.cloudinaryService.uploadBuffer(result.buffer, 'image')
-        : await (async () => {
-            const uploaded = await this.cloudinaryService.uploadFile(result.filePath, 'video');
-            await result.cleanup();
-            return uploaded;
-          })();
+    const uploads = await Promise.all(
+      results.map((result) =>
+        result.mediaType === MediaType.IMAGE
+          ? this.cloudinaryService.uploadBuffer(result.buffer, 'image')
+          : (async () => {
+              const uploaded = await this.cloudinaryService.uploadFile(result.filePath, 'video');
+              await result.cleanup();
+              return uploaded;
+            })(),
+      ),
+    );
 
-    await this.jobRepository.setProcessedMedia(jobId, upload.secureUrl, upload.publicId);
+    const processedMediaUrls = uploads.map((upload) => upload.secureUrl);
+    const processedMediaPublicIds = uploads.map((upload) => upload.publicId);
+
+    await this.jobRepository.setProcessedMedia(jobId, processedMediaUrls, processedMediaPublicIds);
     await this.jobRepository.addLog(jobId, LogLevel.INFO, 'Media processed successfully', {
-      originalSizeBytes: result.originalSizeBytes,
-      processedSizeBytes: result.processedSizeBytes,
+      itemCount: results.length,
+      originalSizeBytes: results.reduce((sum, r) => sum + r.originalSizeBytes, 0),
+      processedSizeBytes: results.reduce((sum, r) => sum + r.processedSizeBytes, 0),
     });
 
     await this.publishingProducer.enqueue({
       jobId,
       reference,
       mediaType,
-      processedMediaUrl: upload.secureUrl,
+      processedMediaUrls,
     });
   }
 
