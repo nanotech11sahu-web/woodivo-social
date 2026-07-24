@@ -51,6 +51,16 @@ export class PublishingProcessor extends WorkerHost {
     const content = record.generatedContent as unknown as SocialContentResponseDto;
     const seo = record.seoParsed as unknown as SeoData;
     const requestedPlatforms = new Set(seo.platforms.map((p) => p.toLowerCase()));
+    const facebookCaption = this.finalizeCaption(
+      content.facebookCaption,
+      content.hashtags,
+      seo.website,
+    );
+    const instagramCaption = this.finalizeCaption(
+      content.instagramCaption,
+      content.hashtags,
+      seo.website,
+    );
     const alreadyPublished = new Set(await this.jobRepository.getPublishedPlatforms(jobId));
     const alreadyCommented = new Set(await this.jobRepository.getCommentedPlatforms(jobId));
 
@@ -62,7 +72,7 @@ export class PublishingProcessor extends WorkerHost {
           jobId,
           processedMediaUrl,
           mediaType,
-          content,
+          facebookCaption,
         );
         externalIds.set(SocialPlatform.FACEBOOK, externalId);
       } else {
@@ -77,7 +87,8 @@ export class PublishingProcessor extends WorkerHost {
           jobId,
           processedMediaUrl,
           mediaType,
-          content,
+          instagramCaption,
+          content.altText,
         );
         externalIds.set(SocialPlatform.INSTAGRAM, externalId);
       } else {
@@ -110,15 +121,15 @@ export class PublishingProcessor extends WorkerHost {
     jobId: string,
     mediaUrl: string,
     mediaType: MediaType,
-    content: SocialContentResponseDto,
+    caption: string,
   ): Promise<string> {
-    const result = await this.facebookService.publish(mediaUrl, mediaType, content.facebookCaption);
+    const result = await this.facebookService.publish(mediaUrl, mediaType, caption);
 
     await this.jobRepository.addMetaResponse({
       jobId,
       platform: SocialPlatform.FACEBOOK,
       endpoint: mediaType === MediaType.IMAGE ? '/photos' : '/videos',
-      requestPayload: { caption: content.facebookCaption, mediaUrl },
+      requestPayload: { caption, mediaUrl },
       responsePayload: result.rawResponse,
       success: true,
       externalId: result.externalId,
@@ -129,7 +140,7 @@ export class PublishingProcessor extends WorkerHost {
       platform: SocialPlatform.FACEBOOK,
       externalId: result.externalId,
       permalink: result.permalink,
-      caption: content.facebookCaption,
+      caption,
     });
 
     return result.externalId;
@@ -139,20 +150,16 @@ export class PublishingProcessor extends WorkerHost {
     jobId: string,
     mediaUrl: string,
     mediaType: MediaType,
-    content: SocialContentResponseDto,
+    caption: string,
+    altText: string,
   ): Promise<string> {
-    const result = await this.instagramService.publish(
-      mediaUrl,
-      mediaType,
-      content.instagramCaption,
-      content.altText,
-    );
+    const result = await this.instagramService.publish(mediaUrl, mediaType, caption, altText);
 
     await this.jobRepository.addMetaResponse({
       jobId,
       platform: SocialPlatform.INSTAGRAM,
       endpoint: '/media',
-      requestPayload: { caption: content.instagramCaption, mediaUrl },
+      requestPayload: { caption, mediaUrl },
       responsePayload: result.rawResponse,
       success: true,
       externalId: result.externalId,
@@ -163,10 +170,31 @@ export class PublishingProcessor extends WorkerHost {
       platform: SocialPlatform.INSTAGRAM,
       externalId: result.externalId,
       permalink: result.permalink,
-      caption: content.instagramCaption,
+      caption,
     });
 
     return result.externalId;
+  }
+
+  /**
+   * The prompt deliberately keeps hashtags out of the AI-written caption
+   * (so the prose reads cleanly) and doesn't force a literal website
+   * mention - both are guaranteed here instead of just hoped for, since a
+   * missing hashtag block or missing link is a real, visible defect on a
+   * live public post, not a cosmetic one.
+   */
+  private finalizeCaption(caption: string, hashtags: string[], website?: string): string {
+    let result = caption.trim();
+
+    if (website && !result.toLowerCase().includes(website.toLowerCase())) {
+      result += `\n\nVisit ${website}`;
+    }
+
+    if (hashtags.length > 0) {
+      result += `\n\n${hashtags.join(' ')}`;
+    }
+
+    return result;
   }
 
   private async commentOnFacebook(

@@ -49,6 +49,9 @@ RULES
 - Do not include any explanation before or after the JSON.
 - Respect the requested tone and language strictly.
 - Never fabricate claims not implied by the business brief (no fake awards, prices, or guarantees).
-- Keep captions free of placeholder text such as "[insert here]".`;
+- Keep captions free of placeholder text such as "[insert here]".
+- If Website is not "N/A", both facebookCaption and instagramCaption MUST include the literal
+  website text written out naturally (e.g. "Visit ${seo.website ?? 'the website'}" or
+  "Shop now at ${seo.website ?? 'the website'}") - never just "link in bio" with no actual URL text.`;
   }
 }
