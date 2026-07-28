@@ -171,4 +171,35 @@ export class IngestController {
     }
     return toPostDetail(job);
   }
+
+  /**
+   * Manual recovery for a FAILED post (or one stuck mid-pipeline with no
+   * forward progress) - resets it to PENDING so the next scheduler tick (or
+   * an immediate trigger-now) picks it up again. Already-published platforms
+   * are never reposted: PublishingProcessor checks getPublishedPlatforms/
+   * getCommentedPlatforms before doing any Meta call, so retrying only
+   * resumes whatever didn't finish.
+   */
+  @Post(':id/retry')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ApiKeyGuard)
+  async retry(@Param('id') id: string): Promise<{ reference: string; jobId: string; status: string }> {
+    const job = await this.jobRepository.findById(id);
+    if (!job) {
+      throw new NotFoundException(`No post found with id "${id}"`);
+    }
+    if (job.status !== 'FAILED' && job.status !== 'PROCESSING') {
+      throw new BadRequestException(
+        `Post "${id}" has status ${job.status} - only FAILED or stuck PROCESSING posts can be retried`,
+      );
+    }
+
+    const updated = await this.jobRepository.resetForRetry(id);
+    this.logger.info(
+      { jobId: id, reference: updated.reference, previousStatus: job.status },
+      'Post manually reset for retry',
+    );
+
+    return { reference: updated.reference, jobId: updated.id, status: 'pending' };
+  }
 }

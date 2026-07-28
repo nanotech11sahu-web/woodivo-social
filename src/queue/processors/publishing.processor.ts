@@ -98,15 +98,23 @@ export class PublishingProcessor extends WorkerHost {
       }
     }
 
+    // The main post is already live by this point - a failure here (most
+    // commonly a Meta permissions error, e.g. the Page token missing
+    // pages_manage_engagement/instagram_manage_comments) must never fail the
+    // whole job and mask a successful publish. Log and move on instead.
     if (content.firstComment) {
       const facebookId = externalIds.get(SocialPlatform.FACEBOOK);
       if (facebookId && !alreadyCommented.has(SocialPlatform.FACEBOOK)) {
-        await this.commentOnFacebook(jobId, facebookId, content.firstComment);
+        await this.tryComment(jobId, SocialPlatform.FACEBOOK, () =>
+          this.commentOnFacebook(jobId, facebookId, content.firstComment),
+        );
       }
 
       const instagramId = externalIds.get(SocialPlatform.INSTAGRAM);
       if (instagramId && !alreadyCommented.has(SocialPlatform.INSTAGRAM)) {
-        await this.commentOnInstagram(jobId, instagramId, content.firstComment);
+        await this.tryComment(jobId, SocialPlatform.INSTAGRAM, () =>
+          this.commentOnInstagram(jobId, instagramId, content.firstComment),
+        );
       }
     }
 
@@ -229,6 +237,42 @@ export class PublishingProcessor extends WorkerHost {
     }
 
     return result;
+  }
+
+  /**
+   * Runs a comment attempt without letting its failure propagate: records a
+   * failed MetaResponse (so getCommentedPlatforms's success:true filter
+   * still lets a later retry try again once the token/permission is fixed)
+   * and a WARN PostLog, then swallows the error.
+   */
+  private async tryComment(
+    jobId: string,
+    platform: SocialPlatform,
+    attempt: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await attempt();
+    } catch (error) {
+      const message = (error as Error).message;
+      this.logger.warn(
+        { jobId, platform, error: message },
+        'First-comment failed after a successful post - not failing the job',
+      );
+      await this.jobRepository.addMetaResponse({
+        jobId,
+        platform,
+        endpoint: 'comments',
+        requestPayload: {},
+        responsePayload: { error: message },
+        success: false,
+      });
+      await this.jobRepository.addLog(
+        jobId,
+        LogLevel.WARN,
+        `First comment on ${platform} failed - post itself was published successfully`,
+        { error: message },
+      );
+    }
   }
 
   private async commentOnFacebook(

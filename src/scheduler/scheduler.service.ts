@@ -14,6 +14,11 @@ const SOURCE_TYPES: readonly PostSourceType[] = [
   PostSourceType.CUSTOM,
   PostSourceType.OTHER,
 ];
+// A job stuck in PROCESSING this long with zero pipeline logs never actually
+// reached a worker (see PublishJobRepository.findStuckProcessing) - most
+// likely a transient Redis blip right after markProcessing() but before the
+// BullMQ enqueue landed. Recover it instead of leaving it silently orphaned.
+const STUCK_PROCESSING_THRESHOLD_MS = 30 * 60 * 1000;
 
 /**
  * Picks up PENDING jobs from MongoDB on a configurable cron schedule. Each
@@ -93,6 +98,7 @@ export class SchedulerService implements OnModuleInit {
     this.isTickRunning = true;
 
     try {
+      await this.recoverStuckJobs();
       await this.processPendingJobs();
     } catch (error) {
       this.logger.error(
@@ -101,6 +107,18 @@ export class SchedulerService implements OnModuleInit {
       );
     } finally {
       this.isTickRunning = false;
+    }
+  }
+
+  /** Requeues any job that has been sitting in PROCESSING with zero pipeline activity - see STUCK_PROCESSING_THRESHOLD_MS. */
+  private async recoverStuckJobs(): Promise<void> {
+    const stuck = await this.jobRepository.findStuckProcessing(STUCK_PROCESSING_THRESHOLD_MS);
+    for (const job of stuck) {
+      this.logger.warn(
+        { jobId: job.id, reference: job.reference, startedAt: job.startedAt },
+        'Recovering job stuck in PROCESSING with no pipeline activity - resetting to PENDING',
+      );
+      await this.jobRepository.resetForRetry(job.id);
     }
   }
 
@@ -147,7 +165,20 @@ export class SchedulerService implements OnModuleInit {
   private async processOneJob(job: PublishJob): Promise<void> {
     await this.jobRepository.markProcessing(job.id);
 
-    await this.aiGenerationProducer.enqueue({ jobId: job.id, reference: job.reference });
+    try {
+      await this.aiGenerationProducer.enqueue({ jobId: job.id, reference: job.reference });
+    } catch (error) {
+      // Enqueue failing after markProcessing() already committed would
+      // otherwise orphan the job in PROCESSING forever with zero trace of
+      // why (see findStuckProcessing) - revert immediately so the next tick
+      // retries it instead of relying solely on the stale-job sweep.
+      this.logger.error(
+        { jobId: job.id, reference: job.reference, error: (error as Error).message },
+        'Failed to enqueue job for AI generation - reverting to PENDING for retry',
+      );
+      await this.jobRepository.resetForRetry(job.id);
+      throw error;
+    }
 
     this.logger.info(
       { jobId: job.id, reference: job.reference, sourceType: job.sourceType },
