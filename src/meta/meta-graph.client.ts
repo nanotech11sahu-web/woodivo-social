@@ -53,6 +53,28 @@ export class MetaGraphClient {
     }
   }
 
+  /**
+   * The resumable-upload endpoints returned by /video_reels and /videos
+   * (rupload.facebook.com) are a different protocol from the rest of the
+   * Graph API - they read the access token and file_url from HTTP headers,
+   * not query params/body. Posting them as query params returns a 400
+   * ("Header Offset not convertable to unsigned long") instead of uploading.
+   */
+  async postToUploadUrl<T = Record<string, unknown>>(
+    uploadUrl: string,
+    accessToken: string,
+    fileUrl: string,
+  ): Promise<MetaApiResult<T>> {
+    try {
+      const response = await this.client.post<T>(uploadUrl, null, {
+        headers: { Authorization: `OAuth ${accessToken}`, file_url: fileUrl },
+      });
+      return { data: response.data, statusCode: response.status };
+    } catch (error) {
+      throw this.toMetaException(error, uploadUrl);
+    }
+  }
+
   private toMetaException(error: unknown, endpoint: string): MetaPublishException {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status;

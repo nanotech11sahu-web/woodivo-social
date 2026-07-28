@@ -205,10 +205,7 @@ export class FacebookService {
       access_token: pageAccessToken,
     });
 
-    await this.graphClient.post(start.data.upload_url, {
-      file_url: videoUrl,
-      access_token: pageAccessToken,
-    });
+    await this.graphClient.postToUploadUrl(start.data.upload_url, pageAccessToken, videoUrl);
 
     await this.waitForReelReady(start.data.video_id, pageAccessToken);
 
