@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { PinoLogger } from 'nestjs-pino';
-import { PublishJob, PostSourceType } from '@prisma/client';
+import { PublishJob, PostSourceType, PublishStage } from '@prisma/client';
 import { AppConfigService } from '../config/app-config.service';
 import { PublishJobRepository } from '../queue/publish-job.repository';
 import { AiGenerationProducer } from '../queue/producers/ai-generation.producer';
@@ -176,7 +176,11 @@ export class SchedulerService implements OnModuleInit {
         { jobId: job.id, reference: job.reference, error: (error as Error).message },
         'Failed to enqueue job for AI generation - reverting to PENDING for retry',
       );
-      await this.jobRepository.resetForRetry(job.id);
+      await this.jobRepository.resetForEnqueueFailure(
+        job.id,
+        PublishStage.AI_GENERATION,
+        (error as Error).message,
+      );
       throw error;
     }
 

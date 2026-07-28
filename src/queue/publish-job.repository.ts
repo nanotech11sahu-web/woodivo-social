@@ -180,6 +180,31 @@ export class PublishJobRepository {
   }
 
   /**
+   * Same as resetForRetry, but for the specific case of the enqueue call
+   * itself failing (e.g. Redis unreachable) right after markProcessing().
+   * Unlike resetForRetry this deliberately KEEPS failureReason/failedStage
+   * set instead of clearing them - the job is still PENDING and will be
+   * auto-retried on the next tick, but until then the reason it stalled is
+   * visible in the CMS instead of silently vanishing (previously this same
+   * failure mode looked identical to "never picked up yet").
+   */
+  resetForEnqueueFailure(
+    jobId: string,
+    stage: PublishStage,
+    reason: string,
+  ): Promise<PublishJob> {
+    return this.prisma.publishJob.update({
+      where: { id: jobId },
+      data: {
+        status: PublishJobStatus.PENDING,
+        failedStage: stage,
+        failureReason: `Retrying automatically - last attempt failed to enqueue: ${reason}`,
+        startedAt: null,
+      },
+    });
+  }
+
+  /**
    * Jobs that left PENDING (status flipped to PROCESSING, startedAt set) but
    * never produced a single log/retry/AI-response row - the signature of the
    * scheduler's markProcessing()->enqueue() succeeding at the DB write but the
