@@ -24,17 +24,6 @@ interface FacebookReelStartResponse {
   upload_url: string;
 }
 
-interface FacebookVideoStatusResponse {
-  status?: { video_status: 'processing' | 'ready' | 'error' };
-}
-
-const REEL_POLL_INTERVAL_MS = 3000;
-// Facebook's own Reel transcoding time is variable and can exceed 2 minutes
-// even for short clips - 120s was observed timing out on a 27s video that
-// later succeeded on retry, purely because Meta hadn't finished processing
-// it yet. 5 minutes gives real transient slowness room without masking an
-// actual stuck video_status.
-const REEL_POLL_TIMEOUT_MS = 300000;
 
 /**
  * Publishes content to a Facebook Page via the Meta Graph API. This is the
@@ -193,8 +182,10 @@ export class FacebookService {
   /**
    * Publishes a Facebook Reel via the dedicated /video_reels flow (distinct
    * from the plain /videos Page-video post used by `publish()`), from a
-   * hosted Cloudinary URL - same "start -> upload -> poll -> finish" shape
-   * as Instagram's container polling in InstagramService.
+   * hosted Cloudinary URL. Meta's own flow is upload -> finish immediately -
+   * processing_phase never leaves "not_started" until `finish` is called
+   * (verified directly against the live API), so waiting for video_status
+   * "ready" between upload and finish would block forever/until timeout.
    */
   async publishReel(videoUrl: string, caption: string): Promise<SocialPublishResult> {
     const { pageId, pageAccessToken } = this.appConfig.meta;
@@ -211,8 +202,6 @@ export class FacebookService {
     });
 
     await this.graphClient.postToUploadUrl(start.data.upload_url, pageAccessToken, videoUrl);
-
-    await this.waitForReelReady(start.data.video_id, pageAccessToken);
 
     const finish = await this.graphClient.post<{ success: boolean }>(`/${pageId}/video_reels`, {
       upload_phase: 'finish',
@@ -231,33 +220,4 @@ export class FacebookService {
     };
   }
 
-  private async waitForReelReady(videoId: string, accessToken: string): Promise<void> {
-    const deadline = Date.now() + REEL_POLL_TIMEOUT_MS;
-
-    while (Date.now() < deadline) {
-      const status = await this.graphClient.get<FacebookVideoStatusResponse>(`/${videoId}`, {
-        fields: 'status',
-        access_token: accessToken,
-      });
-
-      if (status.data.status?.video_status === 'ready') return;
-      if (status.data.status?.video_status === 'error') {
-        throw new MetaPublishException(
-          `Facebook Reel upload failed processing (video_id ${videoId})`,
-          true,
-          undefined,
-          { videoId },
-        );
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, REEL_POLL_INTERVAL_MS));
-    }
-
-    throw new MetaPublishException(
-      `Facebook Reel did not finish processing within ${REEL_POLL_TIMEOUT_MS}ms`,
-      true,
-      undefined,
-      { videoId },
-    );
-  }
 }
