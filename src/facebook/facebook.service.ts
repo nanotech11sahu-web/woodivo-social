@@ -28,8 +28,13 @@ interface FacebookVideoStatusResponse {
   status?: { video_status: 'processing' | 'ready' | 'error' };
 }
 
-const REEL_POLL_INTERVAL_MS = 2000;
-const REEL_POLL_TIMEOUT_MS = 120000;
+const REEL_POLL_INTERVAL_MS = 3000;
+// Facebook's own Reel transcoding time is variable and can exceed 2 minutes
+// even for short clips - 120s was observed timing out on a 27s video that
+// later succeeded on retry, purely because Meta hadn't finished processing
+// it yet. 5 minutes gives real transient slowness room without masking an
+// actual stuck video_status.
+const REEL_POLL_TIMEOUT_MS = 300000;
 
 /**
  * Publishes content to a Facebook Page via the Meta Graph API. This is the
