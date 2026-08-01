@@ -103,6 +103,8 @@ export class VideoProcessorService {
       const probeResult = await this.validate(inputPath, originalSizeBytes);
       const timeoutMs = this.appConfig.media.processingTimeoutMs;
 
+      const stderrTail: string[] = [];
+
       await new Promise<void>((resolve, reject) => {
         const command = ffmpeg(inputPath)
           .videoCodec('libx264')
@@ -119,8 +121,12 @@ export class VideoProcessorService {
             '-threads 2',
             // Reels/feed posts never need more than 1280 on the long edge;
             // downscaling before encode is the single biggest lever on
-            // ffmpeg's peak memory for large phone-camera sources.
-            "-vf scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease",
+            // ffmpeg's peak memory for large phone-camera sources. Wrapped
+            // in trunc(.../2)*2 because yuv420p requires even width/height -
+            // force_original_aspect_ratio=decrease alone can land on an odd
+            // dimension and hard-fail the encode ("Conversion failed!") with
+            // no other detail from fluent-ffmpeg.
+            "-vf scale='trunc(min(1280,iw)/2)*2':'trunc(min(1280,ih)/2)*2':force_original_aspect_ratio=decrease",
           ])
           .output(outputPath);
 
@@ -130,6 +136,10 @@ export class VideoProcessorService {
         }, timeoutMs);
 
         command
+          .on('stderr', (line: string) => {
+            stderrTail.push(line);
+            if (stderrTail.length > 20) stderrTail.shift();
+          })
           .on('end', () => {
             clearTimeout(timer);
             resolve();
@@ -140,9 +150,11 @@ export class VideoProcessorService {
           })
           .run();
       }).catch((error: Error) => {
-        throw new MediaProcessingException(`Failed to process video: ${error.message}`, true, {
-          probeResult,
-        });
+        throw new MediaProcessingException(
+          `Failed to process video: ${error.message}${stderrTail.length ? `\nffmpeg stderr (tail):\n${stderrTail.join('\n')}` : ''}`,
+          true,
+          { probeResult },
+        );
       });
 
       const processedSizeBytes = (await fs.stat(outputPath)).size;
