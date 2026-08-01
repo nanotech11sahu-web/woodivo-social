@@ -1,4 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { AppConfigService } from '../config/app-config.service';
 import { MediaProcessingException } from '../shared/exceptions/app.exceptions';
@@ -82,6 +85,23 @@ export class CloudinaryService implements OnModuleInit {
       );
     }
     return Buffer.from(await response.arrayBuffer());
+  }
+
+  /**
+   * Streams a remote file straight to disk without ever holding the whole
+   * thing in a Node Buffer - the only safe way to pull down large video on a
+   * memory-constrained instance. Use this instead of downloadToBuffer for
+   * anything that isn't guaranteed small (i.e. video).
+   */
+  async downloadToFile(url: string, destPath: string): Promise<void> {
+    const response = await fetch(url);
+    if (!response.ok || !response.body) {
+      throw new MediaProcessingException(
+        `Failed to download media from Cloudinary (${response.status}): ${url}`,
+        true,
+      );
+    }
+    await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destPath));
   }
 
   private toUploadResult(result: UploadApiResponse): CloudinaryUploadResult {

@@ -16,6 +16,7 @@ import {
 import { FilesInterceptor } from '@nestjs/platform-express';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
 import { PinoLogger } from 'nestjs-pino';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { MEDIA_EXTENSIONS } from '../shared/constants/queue.constants';
@@ -99,14 +100,22 @@ export class IngestController {
       );
     }
 
-    const uploads = await Promise.all(
-      files.map((file) =>
-        this.cloudinaryService.uploadBuffer(
-          file.buffer,
-          mediaType === MediaType.IMAGE ? 'image' : 'video',
+    // Files land on disk (see MulterModule config) rather than in a Buffer -
+    // uploadFile streams from the temp path instead of holding the whole
+    // (potentially tens-of-MB video) file in the Node heap.
+    let uploads;
+    try {
+      uploads = await Promise.all(
+        files.map((file) =>
+          this.cloudinaryService.uploadFile(
+            file.path,
+            mediaType === MediaType.IMAGE ? 'image' : 'video',
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => undefined)));
+    }
 
     const reference = `post-${Date.now()}-${randomUUID().slice(0, 8)}`;
 

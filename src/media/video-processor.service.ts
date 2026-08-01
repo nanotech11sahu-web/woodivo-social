@@ -20,12 +20,12 @@ interface ProbeResult {
  * enforces configured limits, then transcodes/compresses to a web-optimized
  * H.264/AAC MP4 within the target bitrate.
  *
- * FFmpeg needs real files, so the input buffer (downloaded from Cloudinary)
- * is written to the OS temp directory just for the duration of this one
- * call, and the caller is responsible for deleting the returned output file
- * once it's uploaded back to Cloudinary. Nothing here is ever expected to
- * survive a restart - it exists only for the few seconds this job is
- * actively running.
+ * Takes an already-downloaded input file path (the caller streams it to disk
+ * via CloudinaryService.downloadToFile - never as a Node Buffer, since source
+ * video can be tens of MB and this runs on a 512MB instance). Output is
+ * written to its own temp directory; the caller is responsible for deleting
+ * the returned output file once it's uploaded back to Cloudinary. Nothing
+ * here is ever expected to survive a restart.
  */
 @Injectable()
 export class VideoProcessorService {
@@ -94,14 +94,12 @@ export class VideoProcessorService {
     return probeResult;
   }
 
-  async process(buffer: Buffer): Promise<ProcessedVideoResult> {
+  async process(inputPath: string): Promise<ProcessedVideoResult> {
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'woodivo-video-'));
-    const inputPath = path.join(workDir, `input-${randomUUID()}`);
     const outputPath = path.join(workDir, `output-${randomUUID()}.mp4`);
 
     try {
-      await fs.writeFile(inputPath, buffer);
-      const originalSizeBytes = buffer.byteLength;
+      const originalSizeBytes = (await fs.stat(inputPath)).size;
       const probeResult = await this.validate(inputPath, originalSizeBytes);
       const timeoutMs = this.appConfig.media.processingTimeoutMs;
 
@@ -110,7 +108,20 @@ export class VideoProcessorService {
           .videoCodec('libx264')
           .audioCodec('aac')
           .videoBitrate(this.appConfig.media.videoTargetBitrateKbps)
-          .outputOptions(['-preset veryfast', '-movflags +faststart', '-pix_fmt yuv420p'])
+          .outputOptions([
+            '-preset veryfast',
+            '-movflags +faststart',
+            '-pix_fmt yuv420p',
+            // Bounds both ffmpeg's own working-set (it scales with frame
+            // buffer count/size) and CPU contention on a shared/small
+            // instance - unrestricted, a 4K phone source can push the
+            // encoder's own memory well past what's left after Node's heap.
+            '-threads 2',
+            // Reels/feed posts never need more than 1280 on the long edge;
+            // downscaling before encode is the single biggest lever on
+            // ffmpeg's peak memory for large phone-camera sources.
+            "-vf scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease",
+          ])
           .output(outputPath);
 
         const timer = setTimeout(() => {
