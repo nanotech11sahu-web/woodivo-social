@@ -121,12 +121,15 @@ export class VideoProcessorService {
             '-threads 2',
             // Reels/feed posts never need more than 1280 on the long edge;
             // downscaling before encode is the single biggest lever on
-            // ffmpeg's peak memory for large phone-camera sources. Wrapped
-            // in trunc(.../2)*2 because yuv420p requires even width/height -
-            // force_original_aspect_ratio=decrease alone can land on an odd
-            // dimension and hard-fail the encode ("Conversion failed!") with
-            // no other detail from fluent-ffmpeg.
-            "-vf scale='trunc(min(1280,iw)/2)*2':'trunc(min(1280,ih)/2)*2':force_original_aspect_ratio=decrease",
+            // ffmpeg's peak memory for large phone-camera sources.
+            // force_divisible_by=2 (not a manual trunc on the input bounds -
+            // confirmed by a real failure: a 1088x1936 source landed on
+            // 719x1280, because force_original_aspect_ratio=decrease
+            // recomputes the non-bounded axis *after* the bounds are
+            // applied, so rounding the bounds themselves doesn't guarantee
+            // the recomputed axis is even) is what actually keeps both
+            // final output dimensions even, which yuv420p requires.
+            "-vf scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
           ])
           .output(outputPath);
 
