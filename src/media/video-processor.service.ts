@@ -111,7 +111,14 @@ export class VideoProcessorService {
           .audioCodec('aac')
           .videoBitrate(this.appConfig.media.videoTargetBitrateKbps)
           .outputOptions([
-            '-preset veryfast',
+            // veryfast measured at ~0.15x realtime on this instance's
+            // throttled shared vCPU (confirmed from a real timeout: 44s of
+            // video encoded in ~290s of wall time) - nowhere near enough
+            // headroom for a 90s+ clip inside any reasonable timeout.
+            // ultrafast is the single biggest lever available without more
+            // CPU; the bitrate cap already controls output size/quality
+            // more than the preset does.
+            '-preset ultrafast',
             '-movflags +faststart',
             '-pix_fmt yuv420p',
             // Bounds both ffmpeg's own working-set (it scales with frame
@@ -119,9 +126,10 @@ export class VideoProcessorService {
             // instance - unrestricted, a 4K phone source can push the
             // encoder's own memory well past what's left after Node's heap.
             '-threads 2',
-            // Reels/feed posts never need more than 1280 on the long edge;
-            // downscaling before encode is the single biggest lever on
-            // ffmpeg's peak memory for large phone-camera sources.
+            // 854 on the long edge (down from 1280) roughly halves the
+            // pixel count ffmpeg has to encode, which was the other big
+            // lever for surviving on a CPU-starved free instance - still
+            // plenty for Reels/feed at the bitrate this targets.
             // force_divisible_by=2 (not a manual trunc on the input bounds -
             // confirmed by a real failure: a 1088x1936 source landed on
             // 719x1280, because force_original_aspect_ratio=decrease
@@ -129,7 +137,7 @@ export class VideoProcessorService {
             // applied, so rounding the bounds themselves doesn't guarantee
             // the recomputed axis is even) is what actually keeps both
             // final output dimensions even, which yuv420p requires.
-            "-vf scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+            "-vf scale='min(854,iw)':'min(854,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
           ])
           .output(outputPath);
 

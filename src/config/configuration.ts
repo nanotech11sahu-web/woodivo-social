@@ -152,7 +152,13 @@ export default (): WoodivoConfiguration => {
       videoTargetBitrateKbps: parseInt(process.env.VIDEO_TARGET_BITRATE_KBPS ?? '3500', 10),
       ffmpegPath: process.env.FFMPEG_PATH || undefined,
       ffprobePath: process.env.FFPROBE_PATH || undefined,
-      processingTimeoutMs: parseInt(process.env.MEDIA_PROCESSING_TIMEOUT_MS ?? '300000', 10),
+      // Raised from 300000: veryfast/1280px was measured at ~0.15x realtime
+      // on this instance's throttled shared vCPU, so 5 minutes wasn't
+      // enough headroom even for moderate-length clips. Lowered preset to
+      // ultrafast and scale to 854px alongside this (see video-processor.service.ts)
+      // to attack the actual encode-speed problem, not just mask it with a
+      // longer timeout.
+      processingTimeoutMs: parseInt(process.env.MEDIA_PROCESSING_TIMEOUT_MS ?? '600000', 10),
     },
     mail: {
       host: process.env.SMTP_HOST || undefined,
